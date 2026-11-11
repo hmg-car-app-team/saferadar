@@ -94,11 +94,11 @@ fun SafeRadarApp(c: RadarController) {
 
 /** 첫 실행(정차 중) 옵트인 동의. 기본은 '동의하지 않음'이며 어느 쪽을 골라도 다시 묻지 않는다. */
 @Composable
-private fun ConsentPopup(c: RadarController) {
+private fun ConsentPopup(c: RadarController, onDone: (() -> Unit)? = null, onAgree: () -> Unit = { c.answerConsent(true) }) {
     PleosPopup(
         title = "근접 위험 경고를 켤까요?",
-        confirmLabel = "동의하고 켜기", onConfirm = { c.answerConsent(true) },
-        onDismissRequest = { c.postponeConsent() }, cancelLabel = "나중에",
+        confirmLabel = "동의하고 켜기", onConfirm = { onAgree(); onDone?.invoke() },
+        onDismissRequest = { if (onDone != null) onDone() else c.postponeConsent() }, cancelLabel = if (onDone != null) "취소" else "나중에",
         // description 은 maxLines=3 으로 말줄임되므로 쓰지 않고 content 슬롯에 전체 고지를 문단별로 넣는다(본문 높이를 팝업 최대 높이의 절반으로 제한하고 넘치면 본문만 스크롤해 버튼이 밀리지 않게 한다(ui 에서 weight 금지 규칙))
         content = {
             Column(Modifier.heightIn(max = PleosTheme.dimensions.popupMaxHeight * 0.5f).verticalScroll(rememberScrollState()).testTag("consent_body"), verticalArrangement = Arrangement.spacedBy(PleosSpacing.s)) {
@@ -215,9 +215,11 @@ private fun WeekPage(c: RadarController, s: UiState) {
 @Composable
 private fun SharePage(c: RadarController, s: UiState) {
     val st = s.p.settings
+    var confirmConsent by remember { mutableStateOf(false) }
+    if (confirmConsent && !s.p.settings.consent) ConsentPopup(c, onDone = { confirmConsent = false }, onAgree = { c.setConsent(true) })
     PleosPanel(Modifier.fillMaxWidth(), title = "근접 위험 경고(익명 공유)") {
         PleosStatusBadge(s.share.label, shareStatusKind(s.share), Modifier.testTag("share_badge_page"))
-        PleosSwitch(checked = st.consent, onCheckedChange = { c.setConsent(it) }, label = "내 대략 위치를 익명으로 공유", modifier = Modifier.testTag("set_consent"))
+        PleosSwitch(checked = st.consent, onCheckedChange = { if (it) confirmConsent = true else c.setConsent(false) }, label = "내 대략 위치를 익명으로 공유", modifier = Modifier.testTag("set_consent"))
         Txt(
             when {
                 !st.consent -> "꺼져 있어요(기본). 켜기 전에는 위치를 어디로도 보내지 않아요."

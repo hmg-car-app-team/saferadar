@@ -1,5 +1,6 @@
 package com.hmgcarapp.saferadar
 
+import com.hmgcarapp.saferadar.domain.Approach
 import com.hmgcarapp.saferadar.domain.Candidate
 import com.hmgcarapp.saferadar.domain.Direction
 import com.hmgcarapp.saferadar.domain.RiskGrade
@@ -89,5 +90,31 @@ class WarnFlowTest {
         } }
         assertTrue(r.st.lastBySignature.size <= WarnFlow.MAX_SIGNATURES)
         assertEquals("가장 최근 상황은 기억한다", true, r.st.lastBySignature.containsKey("NEAR|SPEED_SURGE"))
+    }
+}
+
+/** '접근 중' 판정: 앞쪽 ±각도 이내만 참, 정보 없으면 null(기존 경고 유지). */
+class ApproachTest {
+    @Test fun ahead() { assertEquals(true, Approach.isAhead(0.0)); assertEquals(true, Approach.isAhead(-30.0)) }
+    @Test fun behindAndSide() { assertEquals(false, Approach.isAhead(180.0)); assertEquals(false, Approach.isAhead(90.0)); assertEquals(false, Approach.isAhead(-100.0)) }
+    @Test fun boundary() {
+        assertEquals(true, Approach.isAhead(Approach.AHEAD_HALF_ANGLE_DEG)); assertEquals(true, Approach.isAhead(-Approach.AHEAD_HALF_ANGLE_DEG))
+        assertEquals(false, Approach.isAhead(Approach.AHEAD_HALF_ANGLE_DEG + 0.1))
+    }
+    @Test fun unknown() { assertNull(Approach.isAhead(null)); assertNull(Approach.isAhead(Double.NaN)); assertNull(Approach.relativeBearing(5.0, 5.0)) }
+    @Test fun bearingFromPosition() { assertEquals(0.0, Approach.relativeBearing(100.0, 0.0)!!, 1e-6); assertEquals(90.0, Approach.relativeBearing(0.0, 100.0)!!, 1e-6) }
+    // 위험 차량 정보에는 속도가 없어 '접근 중' 여부를 알 수 없다 — 문구는 위치(앞쪽 등)만 말하고 접근을 단정하지 않는다.
+    @Test fun wordingNeverClaimsApproaching() {
+        val ahead = Candidate(Direction.FRONT, RiskKind.HARD_BRAKE, RiskGrade.HIGH, 90.0, 10.0)
+        assertTrue(WarnText.voice(ahead).contains("있습니다")); assertTrue(!WarnText.voice(ahead).contains("접근")); assertTrue(!WarnText.banner(ahead).contains("접근"))
+        val noDir = ahead.copy(relBearingDeg = null)
+        assertTrue(WarnText.voice(noDir).contains("있습니다")); assertTrue(!WarnText.banner(noDir).contains("접근"))
+        val side = Candidate(Direction.REAR_LEFT, RiskKind.LANE_CHANGE, RiskGrade.HIGH, 120.0, -150.0)
+        assertTrue(!WarnText.voice(side).contains("접근"))
+    }
+    @Test fun unknownStillWarns() {
+        val (st0, _) = WarnFlow.reduce(WarnState(), WarnEvent.DriveChanged(true))
+        val (_, fx) = WarnFlow.reduce(st0, WarnEvent.Nearby(0, listOf(Candidate(Direction.FRONT, null, RiskGrade.HIGH, 90.0))))
+        assertEquals(1, fx.size)
     }
 }

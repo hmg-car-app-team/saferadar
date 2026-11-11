@@ -1,7 +1,27 @@
 package com.hmgcarapp.saferadar.domain
 
 /** 경고 후보: 내 기준 상대 방향·거리와 위험 유형. */
-data class Candidate(val direction: Direction, val kind: RiskKind?, val grade: RiskGrade, val distanceM: Double)
+data class Candidate(
+    val direction: Direction, val kind: RiskKind?, val grade: RiskGrade, val distanceM: Double,
+    /** 내 진행 방향 기준 상대 방위(도, 0=정면, 오른쪽 +, -180..180). 모르거나 불확실하면 null. */
+    val relBearingDeg: Double? = null,
+)
+
+/** '접근 중' 판정(순수). 내 진행 방향 앞쪽 [AHEAD_HALF_ANGLE_DEG] 이내일 때만 참. 방향 정보가 없으면 판정하지 않는다(null). */
+object Approach {
+    const val AHEAD_HALF_ANGLE_DEG = 45.0
+    /** 셀 중심 오차(±수십 m) 때문에 이 거리보다 가까우면 방위를 믿지 않는다. */
+    const val MIN_BEARING_DIST_M = 40.0
+
+    fun relativeBearing(along: Double, lateral: Double): Double? =
+        if (Math.hypot(along, lateral) < MIN_BEARING_DIST_M) null else Math.toDegrees(Math.atan2(lateral, along))
+
+    /** true=앞쪽에서 접근, false=옆·뒤, null=알 수 없음. */
+    fun isAhead(relBearingDeg: Double?): Boolean? {
+        if (relBearingDeg == null || !relBearingDeg.isFinite()) return null
+        return Math.abs(GeoMath.norm360(relBearingDeg + 180.0) - 180.0) <= AHEAD_HALF_ANGLE_DEG
+    }
+}
 
 data class Banner(val text: String, val untilMs: Long)
 
@@ -67,7 +87,8 @@ object WarnText {
         else -> "${c.direction.label}에 ${who(c)}이 있습니다. 차로 변경에 주의하세요."
     }
 
-    fun banner(c: Candidate): String = "${c.direction.label} · ${c.kind?.label?.let { "$it 주의" } ?: "위험 차량 주의"}"
+    fun banner(c: Candidate): String =
+        "${c.direction.label} · ${c.kind?.label?.let { "$it 주의" } ?: "위험 차량 주의"}"
 }
 
 /** 서버 응답(셀 단위 위치) + 내 위치·진행 방향 -> 경고 후보. 반경 밖·반대 방향은 제외한다. */
@@ -84,7 +105,7 @@ object NearbyMapper {
             val (along, lateral) = GeoMath.alongLateral(myLat, myLon, headingDeg, cell.centerLat, cell.centerLon)
             val dist = GeoMath.distanceM(along to lateral)
             if (dist > RADIUS_M + CELL_SLACK_M) null
-            else Candidate(DirectionCalc.relative(along, lateral), v.kind, v.grade, dist)
+            else Candidate(DirectionCalc.relative(along, lateral), v.kind, v.grade, dist, Approach.relativeBearing(along, lateral))
         }
     }
 }
