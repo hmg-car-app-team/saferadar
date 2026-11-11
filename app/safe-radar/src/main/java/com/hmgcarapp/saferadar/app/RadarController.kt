@@ -44,6 +44,9 @@ import com.hmgcarapp.saferadar.vehicle.PleosBrakeSource
 import com.hmgcarapp.saferadar.vehicle.PleosSteeringSource
 import com.hmgcarapp.saferadar.vehicle.PleosTurnSignalSource
 import com.hmgcarapp.saferadar.vehicle.SteeringSource
+import com.hmgcarapp.saferadar.vehicle.PleosSpeedLimitSource
+import com.hmgcarapp.saferadar.vehicle.SpeedLimitSource
+import com.hmgcarapp.saferadar.domain.SpeedLimit
 import com.hmgcarapp.saferadar.vehicle.TurnSignalSource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -76,6 +79,7 @@ class RadarController(
     private val steering: SteeringSource = PleosSteeringSource(context),
     private val brake: BrakeSource = PleosBrakeSource(context),
     private val turn: TurnSignalSource = PleosTurnSignalSource(context),
+    private val speedLimit: SpeedLimitSource = PleosSpeedLimitSource(context),
     private val speaker: Speaker = PleosSpeaker(context),
     private val apiFactory: (String) -> ShareApi = { HttpShareApi(it) },
     serverUrlRaw: String = BuildConfig.RADAR_SERVER_URL,
@@ -105,6 +109,7 @@ class RadarController(
     private var lastBrake: Boolean? = null; private var lastBrakeAt = 0L
     private var lastTurn: TurnSignal? = null; private var lastTurnAt = 0L
     private var lastSteer: Float? = null; private var lastSteerAt = 0L
+    private var lastLimit: Int? = null; private var lastLimitAt = 0L
     private var lastLoc: GeoPoint? = null; private var lastLocAt = 0L
     private var lastHeading: Double? = null
     private var coreDrive = DriveState.DRIVING
@@ -129,6 +134,7 @@ class RadarController(
         }
         scope.launch { steering.angles().catch { HmgLog.w("Steering", "flow 실패 ${it.javaClass.simpleName}") }.collect { if (demoJob == null) { lastSteer = it; lastSteerAt = monoClock() } } }
         scope.launch { brake.pressed().catch { HmgLog.w("Brake", "flow 실패 ${it.javaClass.simpleName}") }.collect { if (demoJob == null) { lastBrake = it; lastBrakeAt = monoClock() } } }
+        scope.launch { speedLimit.limits().catch { HmgLog.w("Limit", "flow 실패 ${it.javaClass.simpleName}") }.collect { if (demoJob == null) { lastLimit = SpeedLimit.sane(it); lastLimitAt = monoClock() } } }
         scope.launch { turn.states().catch { HmgLog.w("Turn", "flow 실패 ${it.javaClass.simpleName}") }.collect { if (demoJob == null) { lastTurn = it; lastTurnAt = monoClock() } } }
         scope.launch {
             // 위치는 메모리에서만 쓰고 저장·로그하지 않는다.
@@ -160,7 +166,7 @@ class RadarController(
         val now = monoClock()
         val speedFresh = lastSpeed != null && now - lastSpeedAt <= FRESH_MS
         val speed = if (speedFresh) lastSpeed else null
-        val events = if (speed != null) detector.feed(DriveSample(now, speed, fresh(lastBrake, lastBrakeAt, now), fresh(lastTurn, lastTurnAt, now), fresh(lastSteer, lastSteerAt, now, STEER_FRESH_MS)))
+        val events = if (speed != null) detector.feed(DriveSample(now, speed, fresh(lastBrake, lastBrakeAt, now), fresh(lastTurn, lastTurnAt, now), fresh(lastSteer, lastSteerAt, now, STEER_FRESH_MS), fresh(lastLimit, lastLimitAt, now, LIMIT_FRESH_MS)))
         else { detector.reset(); emptyList() }
         if (events.isNotEmpty()) { recent += events; HmgLog.i("Event", "감지 ${events.joinToString { it.kind.name }}") }
         recent.removeAll { now - it.tMs > GradeCalc.WINDOW_MS }
@@ -352,7 +358,7 @@ class RadarController(
         demoJob?.cancel(); demoJob = null
         signals.hub.reset()
         recent.clear(); detector.reset(); heading.reset(); lastHeading = null
-        lastBrake = null; lastTurn = null; lastSteer = null
+        lastBrake = null; lastTurn = null; lastSteer = null; lastLimit = null
         _state.update { it.copy(demo = false) }
         dispatchWarn(WarnEvent.DriveChanged(_state.value.drive == DriveState.DRIVING))
     }
@@ -459,6 +465,8 @@ class RadarController(
         const val TICK_MS = 500L
         const val FRESH_MS = 3_000L
         const val STEER_FRESH_MS = 2_000L
+        /** 제한속도는 초당 전달(문서 기준)이라 이 시간 넘게 없으면 '모름'으로 되돌린다. */
+        const val LIMIT_FRESH_MS = 10_000L
         const val LOC_FRESH_MS = 5_000L
         const val PERSIST_EVERY_MS = 30_000L
         const val DEMO_STEP_MS = 100L

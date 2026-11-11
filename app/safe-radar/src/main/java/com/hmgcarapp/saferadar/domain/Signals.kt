@@ -12,7 +12,16 @@ data class DriveSample(
     val brake: Boolean? = null,
     val turn: TurnSignal? = null,
     val steerDeg: Float? = null,
+    /** 현재 도로 제한속도(km/h). NaviHelper 에서 정상 범위 값이 최근에 들어왔을 때만 채운다. null = 알 수 없음(기존 동작). */
+    val limitKmh: Int? = null,
 )
+
+/** 제한속도 값 검증(순수). 정상 범위 밖(0·음수·과대)은 '값 없음'으로 취급한다. */
+object SpeedLimit {
+    const val MIN_KMH = 10
+    const val MAX_KMH = 150
+    fun sane(v: Int?): Int? = v?.takeIf { it in MIN_KMH..MAX_KMH }
+}
 
 /**
  * 위험 이벤트 종류. [weight] 는 점수 감점·위험 등급 산정에 쓰는 **미검증 초기값**이다(실주행 데이터로 보정 필요).

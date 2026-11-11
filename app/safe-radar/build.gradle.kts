@@ -50,6 +50,7 @@ android {
 
 dependencies {
     implementation(project(":core"))
+    implementation(libs.pleos.navihelper) // 읽기 전용 제한속도 리스너만 사용(새 권한 없음)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

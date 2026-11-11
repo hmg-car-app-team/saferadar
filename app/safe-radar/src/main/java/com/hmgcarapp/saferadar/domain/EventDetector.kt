@@ -25,6 +25,13 @@ data class DetectorConfig(
     val highSpeedKmh: Float = 130f,
     val highSpeedRearmKmh: Float = 120f,
     val highSpeedHoldMs: Long = 10_000L,
+    /** 제한속도를 아는 경우에만: 제한속도보다 이만큼 이상 빠른 상태가 highSpeedHoldMs 이어지면 '고속 지속'으로 센다(재무장은 제한속도 + overLimitRearmKmh 미만). 제한속도를 모르면 쓰지 않는다. */
+    val overLimitKmh: Float = 20f,
+    val overLimitRearmKmh: Float = 10f,
+    /** 제한속도가 잠깐 끊겨도(null) 재무장 판단에는 마지막으로 본 제한속도를 이 시간까지 쓴다(유/무 깜빡임으로 같은 고속을 반복해 세지 않기) */
+    val limitMemoryMs: Long = 30_000L,
+    /** 고속 지속 이벤트 사이 최소 간격(재무장과 별개의 안전장치) */
+    val highSpeedCooldownMs: Long = 20_000L,
     /** 급격한 고속 진입: surgeWindowMs 안에 최저 속도 대비 surgeGainKmh 이상 올라 surgeToKmh 이상 도달 */
     val surgeToKmh: Float = 100f,
     val surgeGainKmh: Float = 40f,
@@ -52,10 +59,14 @@ class EventDetector(private val cfg: DetectorConfig = DetectorConfig()) {
     private var lastSurgeAt: Long? = null
     private var highStart: Long? = null
     private var highFired = false
+    private var lastHighAt: Long? = null
+    private var knownLimit: Int? = null
+    private var knownLimitAt = Long.MIN_VALUE
 
     fun reset() {
         history.clear(); lastSignalAt = null; turnKnown = false
         brakeArmed = true; accelArmed = true; lastLaneAt = null; laneConsumedAt = Long.MIN_VALUE; lastSurgeAt = null; highStart = null; highFired = false
+        lastHighAt = null; knownLimit = null; knownLimitAt = Long.MIN_VALUE
     }
 
     fun feed(s: DriveSample): List<RiskEvent> {
@@ -116,12 +127,17 @@ class EventDetector(private val cfg: DetectorConfig = DetectorConfig()) {
     }
 
     private fun highSpeedEvent(s: DriveSample): RiskEvent? {
-        if (s.speedKmh >= cfg.highSpeedKmh) {
+        val limit = SpeedLimit.sane(s.limitKmh)
+        if (limit != null) { knownLimit = limit; knownLimitAt = s.tMs }
+        // 지금 제한속도가 없어도 최근(limitMemoryMs)에 본 값이 있으면 그것으로 판단한다(유/무 깜빡임이 '지속'을 끊거나 재무장시키지 않게)
+        val rearmLimit = limit ?: knownLimit?.takeIf { s.tMs - knownLimitAt <= cfg.limitMemoryMs }
+        val high = s.speedKmh >= cfg.highSpeedKmh || (rearmLimit != null && s.speedKmh >= rearmLimit + cfg.overLimitKmh)
+        if (high) {
             if (highStart == null) highStart = s.tMs
-            if (!highFired && s.tMs - highStart!! >= cfg.highSpeedHoldMs) { highFired = true; return RiskEvent(RiskKind.HIGH_SPEED, s.tMs) }
+            if (!highFired && s.tMs - highStart!! >= cfg.highSpeedHoldMs && lastHighAt.let { it == null || s.tMs - it >= cfg.highSpeedCooldownMs }) { highFired = true; lastHighAt = s.tMs; return RiskEvent(RiskKind.HIGH_SPEED, s.tMs) }
         } else {
-            highStart = null // 130 미만으로 내려가면 '지속'이 끊긴다
-            if (s.speedKmh < cfg.highSpeedRearmKmh) highFired = false // 재무장은 120 미만
+            highStart = null // 기준 미만으로 내려가면 '지속'이 끊긴다
+            if (s.speedKmh < cfg.highSpeedRearmKmh && (rearmLimit == null || s.speedKmh < rearmLimit + cfg.overLimitRearmKmh)) highFired = false // 재무장은 120 미만(제한속도를 알면 제한+10 미만도)
         }
         return null
     }
