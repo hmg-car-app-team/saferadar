@@ -95,9 +95,14 @@ class ShareTest {
         assertEquals("http://10.0.2.2:8765", ServerUrlPolicy.validate("http://10.0.2.2:8765", true))
         assertEquals("http://localhost:8765", ServerUrlPolicy.validate("http://localhost:8765", true))
         assertEquals("http://127.0.0.1:8765", ServerUrlPolicy.validate("http://127.0.0.1:8765", true))
-        // release 에서는 로컬이라도 평문 금지
+        // release: 루프백(adb reverse)만 평문 허용, 에뮬레이터 주소(10.0.2.2)·그 밖의 평문은 금지
+        assertEquals("http://127.0.0.1:8765", ServerUrlPolicy.validate("http://127.0.0.1:8765", false))
+        assertEquals("http://localhost:8765", ServerUrlPolicy.validate("http://localhost:8765", false))
         assertNull(ServerUrlPolicy.validate("http://10.0.2.2:8765", false))
-        assertNull(ServerUrlPolicy.validate("http://127.0.0.1:8765", false))
+        assertNull(ServerUrlPolicy.validate("http://192.168.0.5:8765", false))
+        assertNull(ServerUrlPolicy.validate("http://example.com", false))
+        assertNull(ServerUrlPolicy.validate("http://127.0.0.1.evil.com:8765", false))
+        assertNull(ServerUrlPolicy.validate("http://[::1]:8765", false))
         // debug 라도 로컬 개발 주소 외 평문 금지
         assertNull(ServerUrlPolicy.validate("http://example.com", true))
         assertNull(ServerUrlPolicy.validate("http://127.0.0.1.evil.com:8765", true))
@@ -107,6 +112,18 @@ class ShareTest {
         listOf("", "   ", "10.0.2.2:8765", "ftp://example.com", "https://", "https://example.com/path", "https://example.com?x=1", "https://example.com#f", "https://user:pw@" + "example.com", "javascript:alert(1)", "https://exa mple.com")
             .forEach { assertNull(it, ServerUrlPolicy.validate(it, true)) }
         assertNull(ServerUrlPolicy.validate(null, true))
+        // 정규화·경계
+        assertEquals("https://example.com", ServerUrlPolicy.validate("HTTPS://Example.COM", false))
+        assertEquals("http://localhost:8765", ServerUrlPolicy.validate("http://LocalHost:8765", false))
+        assertNull(ServerUrlPolicy.validate("https://example.com.", false))
+        assertNull(ServerUrlPolicy.validate("http://127.0.0.1:", false))
+        assertNull(ServerUrlPolicy.validate("http://127.0.0.1:0", false))
+        assertNull(ServerUrlPolicy.validate("http://127.0.0.1:65536", false))
+        assertEquals("http://127.0.0.1:65535", ServerUrlPolicy.validate("http://127.0.0.1:65535", false))
+        assertNull(ServerUrlPolicy.validate("http://2130706433:8765", false))
+        assertNull(ServerUrlPolicy.validate("https://2130706433", false))
+        assertEquals("127.0.0.1:8765", ServerUrlPolicy.hostPort("http://127.0.0.1:8765"))
+        assertNull(ServerUrlPolicy.hostPort(null))
         assertNull(ServerUrlPolicy.validate("https://" + "a".repeat(250) + ".com", true))
     }
 

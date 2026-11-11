@@ -26,7 +26,7 @@ class PleosSpeedLimitSource(private val context: Context) : SpeedLimitSource {
     override fun limits(): Flow<Int> = callbackFlow {
         lateinit var conn: ManagedConnection<NaviHelper>
         val listener = object : NaviHelperEventListener {
-            override fun onCurrentRoadSpeedLimit(speedLimit: Int) { trySend(speedLimit); Unit } // 원값 그대로(0 등 비정상도): 소비자가 sane 으로 거르고 비정상이면 이전 값을 지운다
+            override fun onCurrentRoadSpeedLimit(speedLimit: Int) { SpeedLimitProbe.onRaw(speedLimit); trySend(speedLimit); Unit } // 원값 그대로(0 등 비정상도): 소비자가 sane 으로 거르고 비정상이면 이전 값을 지운다
         }
         conn = ManagedConnection(
             tag = "SpeedLimit",

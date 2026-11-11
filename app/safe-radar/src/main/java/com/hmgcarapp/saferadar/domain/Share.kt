@@ -72,9 +72,10 @@ object Wire {
     } catch (t: Throwable) { emptyList() }
 }
 
-/** 서버 주소 검증. https 는 허용, http 는 debuggable 빌드에서 로컬 개발 주소(10.0.2.2·localhost·127.0.0.1)만 허용한다. */
+/** 서버 주소 검증. https 는 허용. http 는 루프백(127.0.0.1·localhost; `adb reverse` 대상)만 모든 빌드에서, 에뮬레이터용 10.0.2.2 는 debuggable 빌드에서만 허용한다. */
 object ServerUrlPolicy {
-    private val LOCAL_HOSTS = setOf("10.0.2.2", "localhost", "127.0.0.1")
+    private val LOOPBACK_HOSTS = setOf("localhost", "127.0.0.1")
+    private const val EMULATOR_HOST = "10.0.2.2"
 
     /** 정상이면 끝 슬래시를 뗀 기본 주소, 아니면 null(= 전송 안 함). */
     fun validate(raw: String?, debuggable: Boolean): String? {
@@ -86,12 +87,19 @@ object ServerUrlPolicy {
         if (u.userInfo != null || u.query != null || u.fragment != null || u.rawPath.orEmpty().let { it.isNotEmpty() && it != "/" }) return null
         val ok = when (scheme) {
             "https" -> true
-            "http" -> debuggable && host in LOCAL_HOSTS
+            "http" -> host in LOOPBACK_HOSTS || (debuggable && host == EMULATOR_HOST)
             else -> false
         }
         if (!ok) return null
-        return s.trimEnd('/')
+        if (host.endsWith(".")) return null // 끝 점 호스트 거부
+        if (host.all { it.isDigit() || it == '.' } && !Regex("(\\d{1,3}\\.){3}\\d{1,3}").matches(host)) return null // 정수형·비정형 숫자 호스트 거부
+        if (u.rawAuthority.orEmpty().endsWith(":")) return null // 빈 포트 거부
+        if (u.port != -1 && u.port !in 1..65535) return null
+        return scheme + "://" + host + (if (u.port != -1) ":" + u.port else "") // 소문자 정규화
     }
+
+    /** 화면 고지용 '호스트:포트'(검증을 통과한 주소에서). 포트가 없으면 호스트만. */
+    fun hostPort(validated: String?): String? = validated?.let { runCatching { URI(it) }.getOrNull() }?.let { u -> u.host?.let { it + (if (u.port != -1) ":" + u.port else "") } }
 }
 
 enum class ShareStatus(val label: String) {

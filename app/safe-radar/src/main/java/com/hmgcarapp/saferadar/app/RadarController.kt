@@ -268,6 +268,9 @@ class RadarController(
     fun postponeConsent() = parkedOnly { updateP { it.copy(settings = it.settings.copy(consentAsked = true)) } }
 
     /** 동의 철회: 공유 즉시 중단 + 익명 ID 폐기 + 서버에 내 항목 삭제 요청(best effort). */
+    /** 고지용 '호스트:포트'(서버 주소가 없으면 null). */
+    fun serverHostPort(): String? = ServerUrlPolicy.hostPort(serverUrl)
+
     fun setConsent(on: Boolean) = parkedOnly {
         updateP { it.copy(settings = it.settings.copy(consent = on, consentAsked = true)) }
         if (!on) revokeLocal()

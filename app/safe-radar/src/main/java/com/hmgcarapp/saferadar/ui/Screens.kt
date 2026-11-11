@@ -103,6 +103,7 @@ private fun ConsentPopup(c: RadarController, onDone: (() -> Unit)? = null, onAgr
         content = {
             Column(Modifier.heightIn(max = PleosTheme.dimensions.popupMaxHeight * 0.5f).verticalScroll(rememberScrollState()).testTag("consent_body"), verticalArrangement = Arrangement.spacedBy(PleosSpacing.s)) {
                 PrivacyText.CONSENT_PARAGRAPHS.forEach { Txt(it, PleosTheme.typography.bodyMedium, secondary = true) }
+                Txt(PrivacyText.destination(c.serverHostPort()), PleosTheme.typography.bodyMedium, secondary = true, modifier = Modifier.testTag("consent_dest"))
             }
         },
     )
@@ -220,9 +221,11 @@ private fun SharePage(c: RadarController, s: UiState) {
     PleosPanel(Modifier.fillMaxWidth(), title = "근접 위험 경고(익명 공유)") {
         PleosStatusBadge(s.share.label, shareStatusKind(s.share), Modifier.testTag("share_badge_page"))
         PleosSwitch(checked = st.consent, onCheckedChange = { if (it) confirmConsent = true else c.setConsent(false) }, label = "내 대략 위치를 익명으로 공유", modifier = Modifier.testTag("set_consent"))
+        Txt(PrivacyText.destination(c.serverHostPort()), PleosTheme.typography.labelMedium, secondary = true, modifier = Modifier.testTag("consent_dest"))
         Txt(
             when {
                 !st.consent -> "꺼져 있어요(기본). 켜기 전에는 위치를 어디로도 보내지 않아요."
+                st.consent && s.serverConfigured && s.share == ShareStatus.ERROR -> "서버 응답을 받지 못했어요. 15초마다 다시 시도해요(계속 실패하면 간격이 늘어나요). 시연으로 전체 흐름을 볼 수 있어요."
                 !s.serverConfigured -> "켜 두었지만 이 빌드에는 서버 주소가 없어 아무것도 보내지 않아요. 시연으로 전체 흐름을 볼 수 있어요."
                 else -> "주행 중(시속 20km 이상)에만 3초마다 보내요. 끄면 즉시 멈추고 서버에 남은 내 항목도 지우도록 요청해요."
             },

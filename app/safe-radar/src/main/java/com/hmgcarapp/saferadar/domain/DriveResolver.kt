@@ -39,6 +39,8 @@ object PrivacyText {
     const val CONSENT_OUTRO = "근접 경고 탭에서 언제든 끌 수 있어요. 안 켜도 점수 기능은 이 기기 안에서 그대로 동작해요."
     const val REVOKE_NOT_SAVED = "동의 철회가 저장되지 않았어요. 앱을 다시 켜면 동의가 복원될 수 있어요"
     /** 동의 팝업이 문단별로 그대로 렌더하는 전체 고지(단일 출처). */
+    /** 전송 대상 고지(동의 팝업·설정 스위치): 현재 서버 주소의 호스트:포트와 개발·시연용 한계를 밝힌다. */
+    fun destination(hostPort: String?): String = if (hostPort == null) "이 빌드에는 서버 주소가 없어 아무것도 보내지 않아요." else "전송 대상: $hostPort (개발·시연용 로컬 서버이며 공개 배포용이 아니에요)."
     val CONSENT_PARAGRAPHS = listOf(CONSENT_INTRO, NOT_SENT, ROUTE, SERVER, CONSENT_OUTRO)
     const val CONSENT_BODY = "$CONSENT_INTRO $NOT_SENT $ROUTE $SERVER $CONSENT_OUTRO"
     const val SHARE_PAGE_BODY = "$NOT_SENT $ROUTE $SERVER"

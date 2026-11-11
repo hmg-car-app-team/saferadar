@@ -74,12 +74,34 @@ class SharePumpAndFlowsTest {
         assertNotNull(p.prepare(13_000, input()))
     }
 
+    @Test fun backsOffTo60SecondsAfterFiveConsecutiveFailures() {
+        val p = pump(); var t = 10_000L
+        repeat(5) { assertNotNull(p.prepare(t, input())); p.finish(false); t += 15_000 }
+        assertEquals(5, p.consecutiveFailures)
+        val last = t - 15_000
+        assertNull(p.prepare(last + 59_999, input()))
+        assertNotNull(p.prepare(last + 60_000, input())); p.finish(true)
+        assertEquals(0, p.consecutiveFailures)
+    }
+
     @Test fun failureIsRememberedAndClearedOnSuccess() {
         val p = pump()
         p.prepare(10_000, input()); p.finish(false)
         assertTrue(p.failed); assertEquals(ShareStatus.ERROR, p.status(input()))
-        p.prepare(13_000, input()); p.finish(true)
+        assertNull("실패 뒤에는 3초가 아니라 15초 간격(재시도 폭주 방지)", p.prepare(13_000, input()))
+        assertNull(p.prepare(24_999, input()))
+        assertNotNull(p.prepare(25_000, input())); p.finish(true)
         assertFalse(p.failed); assertEquals(ShareStatus.ACTIVE, p.status(input()))
+    }
+
+    @Test fun serverUnavailableFallsBackToNoSendAndDemoStillWorks() {
+        // 서버 주소가 없으면(정책 거부 포함) 어떤 입력에도 보내지 않고, 시연은 서버와 무관
+        val none = SharePump(null, null, AnonIdRotator(monoClock = { now }))
+        assertNull(none.prepare(10_000, input()))
+        assertEquals(ShareStatus.NO_SERVER, none.status(input()))
+        assertEquals(ShareStatus.DEMO, none.status(input().copy(demo = true)))
+        // 동의 전에는 서버가 있어도 보내지 않는다
+        assertNull(pump().prepare(10_000, input().copy(consent = false)))
     }
 
     @Test fun revokeReturnsOldIdAndNextReportUsesNewId() {

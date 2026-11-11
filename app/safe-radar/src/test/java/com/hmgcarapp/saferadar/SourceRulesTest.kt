@@ -41,24 +41,33 @@ class SourceRulesTest {
             assertFalse("${f.name}: 평문 http 리터럴", Regex("\"http://").containsMatchIn(c))
             assertFalse("${f.name}: API 키 사용", Regex("API_KEY|apiKey|api_key|secret|Bearer |Authorization", RegexOption.IGNORE_CASE).containsMatchIn(c))
             assertFalse("${f.name}: 고정 서버 주소 하드코딩", Regex("https?://[A-Za-z0-9]").containsMatchIn(c))
-            assertFalse("${f.name}: 사설/로컬 주소 하드코딩", Regex("10\\.0\\.2\\.2|192\\.168\\.|localhost|127\\.0\\.0\\.1").containsMatchIn(c.replace(Regex("\"10\\.0\\.2\\.2\".*"), "")))
+            assertFalse("${f.name}: 사설/로컬 주소 하드코딩", Regex("10\\.0\\.2\\.2|192\\.168\\.|localhost|127\\.0\\.0\\.1").containsMatchIn(c.replace(Regex("\"10\\.0\\.2\\.2\".*"), "").replace(Regex("\"localhost\".*"), "").replace(Regex("\"127\\.0\\.0\\.1\".*"), "")))
         }
         val gradle = File("build.gradle.kts").readText()
         assertFalse("빌드 스크립트에 키 변수", gradle.contains("API_KEY") || gradle.contains("apiKey"))
-        // release 의 기본 서버 주소는 비어 있어야 한다(debug 만 10.0.2.2)
-        assertTrue(gradle.contains("release {") && gradle.substringAfter("release {").substringBefore("}").contains("quoted(configuredServerUrl)"))
+        // release 의 기본 서버 주소는 루프백(adb reverse), debug 는 에뮬레이터 주소(10.0.2.2)
+        val rel = gradle.substringAfter("release {").substringBefore("}")
+        assertTrue(gradle.contains("val releaseDefaultUrl = \"http://127.0.0.1:8765\""))
+        assertTrue(rel.contains("releaseDefaultUrl") && rel.contains("configuredServerUrl"))
+        assertFalse("release 에 10.0.2.2 기본값 금지(LAN 사설 주소 위험)", rel.contains("10.0.2.2") || gradle.substringBefore("android {").contains("10.0.2.2:"))
         assertTrue(gradle.substringAfter("debug {").substringBefore("}").contains("http://10.0.2.2:8765"))
-        assertFalse("release 블록에 평문 주소 기본값 금지", gradle.substringAfter("release {").substringBefore("}").contains("http"))
     }
 
     @Test fun cleartextOnlyInDebugSourceSet() {
         val main = File("src/main/res/xml/network_security_config.xml").readText()
         assertTrue(main.contains("cleartextTrafficPermitted=\"false\""))
-        assertFalse("main(release 포함) 설정에 평문 허용 금지", main.contains("cleartextTrafficPermitted=\"true\"") || main.contains("<domain "))
+        val mainDomains = Regex("<domain[^>]*>([^<]+)</domain>").findAll(main).map { it.groupValues[1] }.toSet()
+        assertEquals("main(release 포함)에서 평문을 허용하는 주소는 루프백뿐(10.0.2.2 아님)", setOf("127.0.0.1", "localhost"), mainDomains)
+        assertEquals("평문 허용 domain-config 는 하나", 1, Regex("cleartextTrafficPermitted=\"true\"").findAll(main).count())
+        assertFalse(main.contains("includeSubdomains=\"true\""))
         val debug = File("src/debug/res/xml/network_security_config.xml").readText()
         val domains = Regex("<domain[^>]*>([^<]+)</domain>").findAll(debug).map { it.groupValues[1] }.toSet()
         assertEquals("debug 에서 평문을 허용하는 주소는 로컬 개발 주소뿐", setOf("10.0.2.2", "localhost", "127.0.0.1"), domains)
-        assertFalse(File("src/release").exists())
+        // release 소스셋은 SpeedLimitProbe 무동작 구현 하나뿐이며 로그·문자열이 없다
+        val rel = File("src/release").walkTopDown().filter { it.isFile }.map { it.relativeTo(File("src/release")).path }.toList()
+        assertEquals(listOf("java/com/hmgcarapp/saferadar/vehicle/SpeedLimitProbe.kt"), rel)
+        val relCode = code(File("src/release/" + rel[0]))
+        assertFalse("release 프로브에 문자열 리터럴·로그 금지", relCode.contains("\"") || relCode.contains("HmgLog") || relCode.contains("Log."))
         assertTrue(File("src/main/AndroidManifest.xml").readText().contains("android:networkSecurityConfig=\"@xml/network_security_config\""))
         assertFalse(File("src/main/AndroidManifest.xml").readText().contains("usesCleartextTraffic"))
     }
@@ -107,8 +116,19 @@ class SourceRulesTest {
         assertTrue(share.contains("data class Report(val id: String, val geohash: String, val heading8: Int, val grade: RiskGrade, val kind: RiskKind?)"))
     }
 
-    @Test fun releaseHasNoServerDefault_andServerUrlPolicyIsUsed() {
+    @Test fun controllerUsesServerUrlPolicy() {
         val c = code(File(root, "app/RadarController.kt"))
         assertTrue(c.contains("ServerUrlPolicy.validate(serverUrlRaw, debuggable)"))
+    }
+
+    @Test fun speedLimitProbeIsDebugOnly() {
+        val dbg = File("src/debug/java/com/hmgcarapp/saferadar/vehicle/SpeedLimitProbe.kt").readText()
+        assertTrue(dbg.contains("raw=\$raw count=\$count"))
+        // main 은 프로브를 호출만 한다: 관측 문자열·로그 호출이 main 에 없어야 release 에 남지 않는다
+        val nav = code(File(root, "vehicle/NaviSpeedLimit.kt"))
+        assertTrue(nav.contains("SpeedLimitProbe.onRaw(speedLimit)"))
+        assertFalse(kt().any { code(it).contains("raw=") })
+        // 프로브는 좌표·주소 등을 다루지 않는다
+        assertFalse(Regex("latitude|longitude|geohash|serverUrl", RegexOption.IGNORE_CASE).containsMatchIn(dbg))
     }
 }

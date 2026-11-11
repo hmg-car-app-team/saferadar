@@ -30,8 +30,12 @@ class SharePump(
     private val serverUrl: String?,
     private val idRotator: AnonIdRotator,
     private val everyMs: Long = EVERY_MS,
+    private val errorEveryMs: Long = ERROR_EVERY_MS,
+    private val longErrorEveryMs: Long = LONG_ERROR_EVERY_MS,
 ) {
     var failed: Boolean = false; private set
+    /** 연속 실패 횟수: [BACKOFF_AFTER] 회 이상이면 재시도 간격을 [longErrorEveryMs] 로 늘린다. 성공하거나 철회하면 0. */
+    var consecutiveFailures: Int = 0; private set
     private var inFlight = false
     private var lastAt: Long? = null
     /** 마지막으로 보낸 익명 ID: 바뀌면 이전 ID 를 서버에서 지우도록 [takePendingLeave] 로 넘긴다. */
@@ -53,7 +57,7 @@ class SharePump(
     /** 지금 보내야 하면 보낼 [Report](익명 ID·셀·방향·등급·유형뿐), 아니면 null. 반환 시 전송 중 상태가 된다 -> [finish] 필수. */
     fun prepare(nowMs: Long, i: ShareInput): Report? {
         if (api == null || !ShareGate.mayConnect(status(i)) || inFlight) return null
-        lastAt?.let { if (nowMs - it < everyMs) return null }
+        lastAt?.let { if (nowMs - it < (if (!failed) everyMs else if (consecutiveFailures >= BACKOFF_AFTER) longErrorEveryMs else errorEveryMs)) return null } // 실패 뒤에는 간격을 늘려 재시도 폭주를 막는다
         val lat = i.lat ?: return null; val lon = i.lon ?: return null; val hd = i.headingDeg ?: return null
         // 값 검증과 변환은 전송 중 상태로 바꾸기 전에: 잘못된 좌표(NaN·범위 밖)가 와도 다음 틱에 다시 시도할 수 있다
         if (!lat.isFinite() || !lon.isFinite() || !hd.isFinite() || lat !in -90.0..90.0 || lon !in -180.0..180.0) return null
@@ -111,13 +115,17 @@ class SharePump(
     }
 
     /** [gen] 이 이미 낡았으면(철회 이후) 실패 표시를 남기지 않는다. */
-    fun finish(ok: Boolean, gen: Int = generation) { failed = !ok && gen == generation; inFlight = false }
+    fun finish(ok: Boolean, gen: Int = generation) {
+        failed = !ok && gen == generation
+        if (ok || gen != generation) consecutiveFailures = 0 else consecutiveFailures++
+        inFlight = false
+    }
 
     /** 동의 철회: 현재 익명 ID 를 폐기하고, 서버에서 지워야 할 이전 ID 를 돌려준다(없으면 null). 다음 전송은 새 ID 로 시작. */
     fun revoke(): String? {
         val old = idRotator.peek()
         idRotator.clear()
-        failed = false; generation++
+        failed = false; consecutiveFailures = 0; generation++
         lastId = null; pendingLeave = null; suppressUntil = null; curOwn.clear(); prevOwn = emptyList()
         return old
     }
@@ -131,6 +139,11 @@ class SharePump(
     }
 
     companion object { const val EVERY_MS = 3_000L
+        /** 직전 전송이 실패한 동안의 재시도 간격 */
+        const val ERROR_EVERY_MS = 15_000L
+        /** 연속 실패가 이 횟수 이상이면 [LONG_ERROR_EVERY_MS] 간격 */
+        const val BACKOFF_AFTER = 5
+        const val LONG_ERROR_EVERY_MS = 60_000L
         /** 서버 TTL(15초)과 같은 길이 */
         const val SELF_WINDOW_MS = 15_000L
         const val LEAVE_TIMEOUT_MS = 3_000L }
