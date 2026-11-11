@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 차량 전용이지만 개발 편의를 위해 required=false (병합 결과에서는 Pleos SDK 때문에 automotive 가 필수가 된다) -->
+    <uses-feature android:name="android.hardware.type.automotive" android:required="false" />
+
+    <!-- 차속(android.car, 런타임 요청 후 승인) -->
+    <uses-permission android:name="android.car.permission.CAR_SPEED" />
+    <!-- Pleos: 기어·브레이크 페달·조향각(CAR_DRIVE), 방향지시등(CAR_LIGHTS), 위치(FUSED_LOCATION), 음성 경고(TTS) -->
+    <uses-permission android:name="pleos.car.permission.CAR_DRIVE" />
+    <uses-permission android:name="pleos.car.permission.CAR_LIGHTS" />
+    <uses-permission android:name="pleos.car.permission.FUSED_LOCATION" />
+    <uses-permission android:name="pleos.car.permission.TTS_SERVICE" />
+    <!-- 위치(런타임 요청: 서비스 시작 전에 Activity 에서 먼저) + 위치 유형 포그라운드 서비스 -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 근접 경고 서버 통신(옵트인 동의 + 서버 주소가 설정된 경우에만 사용) -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 선언하지 않는 것: 음성 인식(마이크), 부팅 수신기, 연락처, 계정, 기기 식별 권한 -->
+
+    <application
+        android:allowBackup="false"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <uses-library android:name="android.car" android:required="false" />
+        <!-- 주의분산 최적화(DO) 선언: 앱 전체 + 액티비티 -->
+        <meta-data android:name="distractionOptimized" android:value="true" />
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|uiMode|density|fontScale|locale|layoutDirection|keyboard|keyboardHidden|navigation"
+            android:resizeableActivity="true">
+            <meta-data android:name="distractionOptimized" android:value="true" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- 앱 실행 중 백그라운드에서 주행 점수 수집을 이어가는 위치 유형 포그라운드 서비스(외부에서 시작 불가) -->
+        <service
+            android:name=".app.RadarService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
+    </application>
+</manifest>

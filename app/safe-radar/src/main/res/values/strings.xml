@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">세이프레이더 SafeRadar</string>
+    <string name="notif_channel">주행 점수 수집</string>
+    <string name="notif_title">세이프레이더 동작 중</string>
+    <string name="notif_text">안전운전 점수를 이 기기에서 계산하고 있어요</string>
+</resources>

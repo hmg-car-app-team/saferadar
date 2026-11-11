@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 기본(release 포함): HTTPS 만 허용. 평문(cleartext) 트래픽 명시적 금지.
+     debug 빌드는 src/debug/res/xml/network_security_config.xml 이 이 파일을 대체해 로컬 개발 주소만 평문을 허용한다. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>
