@@ -236,7 +236,7 @@ private fun SharePage(c: RadarController, s: UiState) {
         PleosListItem(title = "익명 번호", description = "10분마다 바뀌는 무작위 값(기기·계정과 무관, 저장하지 않음)")
         PleosListItem(title = "대략 위치", description = "약 150m 격자(Geohash 7자리). 정확한 좌표는 보내지 않아요")
         PleosListItem(title = "진행 방향", description = "8방위 중 하나")
-        PleosListItem(title = "위험 등급·유형", description = "최근 10분 이벤트로 계산한 등급(양호/주의/위험)과 주된 유형")
+        PleosListItem(title = "위험 등급·유형", description = "최근 10분 이벤트로 계산한 등급(양호/주의/위험)과 주된 유형(유형은 위험 등급일 때만)")
     }
     PleosPanel(Modifier.fillMaxWidth(), title = "보내지 않는 것") {
         Txt(PrivacyText.SHARE_PAGE_BODY, secondary = true)

@@ -54,14 +54,20 @@ class ShareTest {
         try { rot.current(); throw AssertionError("길이가 다르면 거부") } catch (e: IllegalArgumentException) { }
     }
 
-    // ---------------- 전송 본문: 정해진 5개 키뿐 ----------------
+    // ---------------- 전송 본문: 정해진 키뿐(위험 등급 5개, 그 외 4개) ----------------
     @Test fun reportBodyContainsOnlyAllowedKeys() {
         val id = "0123456789abcdef0123456789abcdef"
         val j = JSONObject(Wire.encodeReport(Report(id, "wydm6ds", 3, RiskGrade.HIGH, RiskKind.LANE_CHANGE)))
         assertEquals(setOf("id", "gh", "hd", "g", "k"), j.keys().asSequence().toSet())
         assertEquals(id, j.getString("id")); assertEquals("wydm6ds", j.getString("gh"))
         assertEquals(3, j.getInt("hd")); assertEquals(2, j.getInt("g")); assertEquals(2, j.getInt("k"))
-        assertEquals(-1, JSONObject(Wire.encodeReport(Report(id, "wydm6ds", 0, RiskGrade.LOW, null))).getInt("k"))
+        assertEquals(-1, JSONObject(Wire.encodeReport(Report(id, "wydm6ds", 0, RiskGrade.HIGH, null))).getInt("k"))
+        // 비HIGH 등급은 k 키를 보내지 않는다(종류가 있어도 싣지 않음)
+        for (g in listOf(RiskGrade.LOW, RiskGrade.MID)) for (k in listOf(null, RiskKind.LANE_CHANGE)) {
+            val o = JSONObject(Wire.encodeReport(Report(id, "wydm6ds", 0, g, k)))
+            assertEquals(setOf("id", "gh", "hd", "g"), o.keys().asSequence().toSet())
+            assertEquals(g.code, o.getInt("g"))
+        }
         assertEquals(setOf("id"), JSONObject(Wire.encodeLeave(id)).keys().asSequence().toSet())
         assertTrue("본문은 서버 한도(256B) 이내", Wire.encodeReport(Report(id, "wydm6ds", 7, RiskGrade.HIGH, RiskKind.SPEED_SURGE)).length <= 256)
     }

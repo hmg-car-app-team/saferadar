@@ -76,7 +76,7 @@ class SharePump(
         lastId = id
         curOwn.addLast(Triple(gh, sector, nowMs)) // 새 ID 보고는 억제 대상에 넣지 않는다
         while (curOwn.isNotEmpty() && nowMs - curOwn.first().third > SELF_WINDOW_MS) curOwn.removeFirst()
-        return Report(id, gh, sector, i.grade, i.kind)
+        return Report(id, gh, sector, i.grade, i.kind.takeIf { i.grade == RiskGrade.HIGH }) // 위험 유형은 위험 등급일 때만
     }
 
     /** ID 교체로 서버에서 지워야 할 이전 ID(한 번만 돌려준다). */

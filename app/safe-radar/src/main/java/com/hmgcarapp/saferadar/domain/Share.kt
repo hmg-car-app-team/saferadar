@@ -52,8 +52,10 @@ object Wire {
     const val MAX_NEARBY = 20
     val ID_REGEX = Regex("[0-9a-f]{32}")
 
+    /** 위험 유형 `k` 는 위험(HIGH) 등급일 때만 싣는다. 그 외 등급은 `k` 키 자체를 보내지 않는다(서버도 싣으면 거부). */
     fun encodeReport(r: Report): String = JSONObject()
-        .put("id", r.id).put("gh", r.geohash).put("hd", r.heading8).put("g", r.grade.code).put("k", r.kind?.code ?: -1)
+        .put("id", r.id).put("gh", r.geohash).put("hd", r.heading8).put("g", r.grade.code)
+        .also { if (r.grade == RiskGrade.HIGH) it.put("k", r.kind?.code ?: -1) }
         .toString()
 
     fun encodeLeave(id: String): String = JSONObject().put("id", id).toString()
