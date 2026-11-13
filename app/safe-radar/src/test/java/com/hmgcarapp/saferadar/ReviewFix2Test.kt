@@ -88,17 +88,11 @@ class ReviewFix2Test {
     }
 
     // 2) 고지 문구 한 곳
-    @Test fun consentPopupSharePageAndReadmeShareTheSameKeySentences() {
+    @Test fun consentPopupUsesShortConstants_readmeKeepsRouteSentences() {
         val ui = src("ui/Screens.kt")
         assertTrue(ui.contains("PrivacyText.CONSENT_PARAGRAPHS.forEach")) // 팝업은 description(3줄 말줄임)이 아닌 content 슬롯
-        assertTrue(ui.contains("Txt(PrivacyText.SHARE_PAGE_BODY"))
+        assertFalse("근접 경고 탭에 별도 고지 패널을 두지 않는다", ui.contains("SHARE_PAGE_BODY") || ui.contains("서버로 보내는 것") || ui.contains("보내지 않는 것"))
         assertFalse("화면에 고지 문장을 직접 쓰지 않는다(상수만)", ui.contains("접속 IP") || ui.contains("로컬 테스트 서버"))
-        listOf(PrivacyText.ROUTE, PrivacyText.SERVER, PrivacyText.NOT_SENT).forEach {
-            assertTrue(PrivacyText.CONSENT_BODY.contains(it)); assertTrue(PrivacyText.SHARE_PAGE_BODY.contains(it))
-        }
-        assertTrue(PrivacyText.CONSENT_BODY.contains("같은 번호로 최대 10분간"))
-        assertTrue(PrivacyText.CONSENT_BODY.contains("서버는 접속 IP 를 볼 수 있어요"))
-        assertTrue(PrivacyText.CONSENT_BODY.contains("이 앱이 설계상 연결하는 서버(로컬 테스트 서버 기준)"))
         File("README.md").takeIf { it.exists() }?.readText()?.let { readme ->
             assertTrue(readme.contains(PrivacyText.ROUTE)); assertTrue(readme.contains(PrivacyText.SERVER))
         }

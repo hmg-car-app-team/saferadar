@@ -105,12 +105,12 @@ object ServerUrlPolicy {
 }
 
 enum class ShareStatus(val label: String) {
-    NO_CONSENT("동의 전: 위치를 보내지 않아요"),
-    NO_SERVER("서버 미설정: 위치를 보내지 않아요"),
-    DEMO("시연 중: 서버로 보내지 않아요"),
-    WAITING("대기 중: 위치 또는 주행 확인 전"),
+    NO_CONSENT("꺼짐"),
+    NO_SERVER("꺼짐"),
+    DEMO("시연 중"),
+    WAITING("대기 중"),
     ACTIVE("공유 중(익명)"),
-    ERROR("서버에 연결하지 못했어요"),
+    ERROR("연결 실패"),
 }
 
 /** 서버 전송 허용 판정(순수). 이 중 하나라도 어긋나면 위치를 보내지 않는다. */

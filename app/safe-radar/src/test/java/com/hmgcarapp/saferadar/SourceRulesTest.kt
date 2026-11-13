@@ -12,6 +12,14 @@ class SourceRulesTest {
     private fun kt(sub: String? = null): List<File> = (if (sub == null) root else File(root, sub)).walkTopDown().filter { it.extension == "kt" }.toList()
     private fun code(f: File) = f.readLines().filter { !it.trimStart().startsWith("//") && !it.trimStart().startsWith("*") && !it.trimStart().startsWith("/*") }.joinToString("\n")
 
+    @Test fun ui_hasNoImplementationExplanationCopy() {
+        val ui = File(root, "ui/Screens.kt").readText() + File(root, "domain/Share.kt").readText() + File(root, "domain/DriveResolver.kt").readText()
+        listOf("미검증 초기값", "초기값이에요", "가상 차량과 가상", "시연 데이터(저장하지 않음)", "시연 중: 서버로", "개발·시연용", "주행 중으로 간주해요", "sim_badge", "driving_notice", "corrupt_kept", "save_held", "다시 시도해요(계속 실패하면", "가속페달 신호는 이 차량 플랫폼에 없어")
+            .forEach { assertFalse("화면에 구현 사정 설명 문구 금지: $it", ui.contains(it)) }
+        assertTrue(ui.contains("btn_demo") && ui.contains("set_consent") && ui.contains("consent_body"))
+        listOf("signals_line", "consent_note", "share_badge\"", "알아두세요", "저장된 기록과 개인정보", "받고 있는 차량 신호").forEach { assertFalse("제거된 안내 패널: $it", ui.contains(it)) }
+    }
+
     @Test fun sourcesExist() { assertTrue(kt().size >= 18) }
 
     @Test fun ui_usesOnlyPleosComponentsAndTokens() {

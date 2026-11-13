@@ -125,11 +125,11 @@ class ReviewFix1Test {
 
     @Test fun privacyNoticesAreCorrected() {
         val ui = File("src/main/java/com/hmgcarapp/saferadar/ui/Screens.kt").readText()
-        assertTrue(ui.contains("약 2분 10초"))
+        assertFalse("시연 모드 부연 설명(소요 시간 안내)은 화면에 두지 않는다", ui.contains("약 2분 10초") || ui.contains("가상 차량") || ui.contains("미검증 초기값"))
+        assertTrue(ui.contains("btn_demo"))
         // 단독 fork 에는 앱 모듈 README 가 없다(루트 README 로 합쳐짐) — 모노레포에서만 검사
         File("README.md").takeIf { it.exists() }?.readText()?.let { readme ->
             assertTrue(readme.contains(com.hmgcarapp.saferadar.domain.PrivacyText.ROUTE))
-            assertTrue(readme.contains("재동의가 필요하지만 이 버전에는 구현돼 있지 않다"))
         }
     }
 
@@ -147,7 +147,8 @@ class ReviewFix1Test {
     @Test fun voiceLinePrefixesDemo() {
         assertEquals("오늘 안전점수 72점, 위험 이벤트 5회입니다.", TripVoice.line(72, 5, false))
         assertEquals("시연입니다. 오늘 안전점수 72점, 위험 이벤트 5회입니다.", TripVoice.line(72, 5, true))
-        assertEquals("시연입니다. 이번 주행은 짧아 점수를 계산하지 않았어요.", TripVoice.line(null, 0, true))
+        assertNull("점수가 없으면 말하지 않는다", TripVoice.line(null, 0, true))
+        assertNull(TripVoice.line(null, 0, false))
     }
 
     // 11) 고속 지속 경로

@@ -22,10 +22,17 @@ class ConsentPopupSourceTest {
         assertTrue(popup.contains("verticalScroll"))
     }
 
-    @Test fun paragraphsCoverAllKeyNotices() {
-        assertEquals(listOf(PrivacyText.CONSENT_INTRO, PrivacyText.NOT_SENT, PrivacyText.ROUTE, PrivacyText.SERVER, PrivacyText.CONSENT_OUTRO), PrivacyText.CONSENT_PARAGRAPHS)
+    @Test fun paragraphsAreShortAndFactual() {
+        assertEquals(listOf(PrivacyText.CONSENT_INTRO, PrivacyText.CONSENT_OUTRO), PrivacyText.CONSENT_PARAGRAPHS)
         val all = PrivacyText.CONSENT_PARAGRAPHS.joinToString(" ")
-        listOf("접속 IP", "최대 10분", "15초", "언제든 끌 수 있어요").forEach { assertTrue(it, all.contains(it)) }
+        listOf("대략 위치", "진행 방향", "위험 등급", "위험 등급일 때만 주된 위험 유형", "익명 번호", "서버에 보내요", "끄면 바로 멈춰요").forEach { assertTrue(it, all.contains(it)) }
         assertEquals(PrivacyText.CONSENT_BODY, all)
+    }
+
+    @Test fun consentGateAndDefaultOffArePreserved() {
+        val ui = File("src/main/java/com/hmgcarapp/saferadar/ui/Screens.kt").readText()
+        assertTrue(ui.contains("set_consent") && ui.contains("confirmConsent = true"))
+        assertTrue(ui.contains("confirmLabel = \"동의하고 켜기\""))
+        assertFalse("스위치는 동의 팝업 확인 전에 켜지지 않는다", ui.contains("onCheckedChange = { c.setConsent(it) }"))
     }
 }

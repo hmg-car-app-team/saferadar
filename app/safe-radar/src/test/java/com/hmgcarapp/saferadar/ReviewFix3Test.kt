@@ -44,7 +44,7 @@ class ReviewFix3Test {
     }
 
     @Test fun revocationFailureMessageIsHonest() {
-        assertEquals("동의 철회가 저장되지 않았어요. 앱을 다시 켜면 동의가 복원될 수 있어요", PrivacyText.REVOKE_NOT_SAVED)
+        assertEquals("동의 철회를 저장하지 못했어요", PrivacyText.REVOKE_NOT_SAVED)
     }
 
     // 2) 오래된 셀은 prevOwn 에 넣지 않는다
@@ -86,13 +86,13 @@ class ReviewFix3Test {
 
     // 4·5) 고지 문구
     @Test fun consentTextsMatchTabAndItems() {
-        assertTrue(PrivacyText.CONSENT_OUTRO.startsWith("근접 경고 탭에서 언제든 끌 수 있어요"))
+        assertEquals("끄면 바로 멈춰요.", PrivacyText.CONSENT_OUTRO)
         assertFalse(PrivacyText.CONSENT_BODY.contains("설정에서 언제든"))
-        assertTrue(PrivacyText.CONSENT_INTRO.contains("위치(약 150m 격자)·진행 방향·위험 등급(위험 등급일 때만 주된 위험 유형 포함)을"))
+        assertTrue(PrivacyText.CONSENT_INTRO.contains("위치(약 150m 격자)·진행 방향·위험 등급(위험 등급일 때만 주된 위험 유형)을"))
         File("README.md").takeIf { it.exists() }?.readText()?.let { readme ->
             assertTrue(readme.contains("근접 경고 탭의 스위치를 끄면") && !readme.contains("설정/근접 경고 탭"))
             assertTrue(readme.contains("주된 유형 코드"))
         }
-        assertTrue(src("ui/Screens.kt").contains("주된"))
+        assertTrue(PrivacyText.CONSENT_BODY.contains("주된"))
     }
 }

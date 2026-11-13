@@ -197,7 +197,7 @@ class RadarController(
         HmgLog.i("Trip", "주행 종료 점수=${score ?: "없음"} 이벤트=${s.totalEvents}${if (demo) " (시연: 저장 안 함)" else ""}")
         // 정차했을 때만 말한다(주행 중에는 안내 외 음성 없음)
         if (_state.value.drive == DriveState.PARKED && _state.value.p.settings.voiceWarn) {
-            speaker.speak(TripVoice.line(score, s.totalEvents, demo))
+            TripVoice.line(score, s.totalEvents, demo)?.let { speaker.speak(it) }
         }
     }
 
@@ -315,7 +315,7 @@ class RadarController(
         val pending = capturePending()
         scope.launch {
             val ok = withContext(Dispatchers.IO) { stateStore.clearAll { persistedCopy(pending) } }
-            _state.update { it.copy(saveHeld = !stateStore.writable, corruptKept = false, message = if (ok) "저장된 주행 기록을 모두 지웠어요" else "삭제하지 못했어요. 잠시 후 다시 시도해 주세요") }
+            _state.update { it.copy(saveHeld = !stateStore.writable, corruptKept = false, message = if (ok) "저장된 주행 기록을 모두 지웠어요" else "삭제하지 못했어요") }
         }
     }
 
@@ -433,7 +433,7 @@ class RadarController(
     private fun onWriteResult(r: WriteResult) {
         when (r) {
             WriteResult.WROTE -> _state.update { if (it.corruptKept) it.copy(corruptKept = false) else it }
-            WriteResult.FAILED -> _state.update { it.copy(saveHeld = true, message = "저장하지 못해 이번에는 저장하지 않아요") }
+            WriteResult.FAILED -> _state.update { it.copy(saveHeld = true, message = "저장하지 못했어요") }
             WriteResult.UNCHANGED, WriteResult.HELD -> Unit
         }
     }
