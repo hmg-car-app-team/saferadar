@@ -1,6 +1,7 @@
 package com.hmgcarapp.saferadar.ui
 
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -68,12 +69,18 @@ fun RoadScene(speedKmh: Float?, steerDeg: Float?, alertDirection: Direction?, mo
     val pulse by loop.animateFloat(0.72f, 1f, infiniteRepeatable(tween(RoadMotion.PULSE_MS), RepeatMode.Reverse), label = "pulse")
     val curve by animateFloatAsState(RoadMotion.curveFor(steerDeg), tween(RoadMotion.CURVE_MS), label = "curve")
 
-    // 위험 방향: 바뀌면 짧은 쪽으로 돌아가고, 경고가 끝나면 그 자리에서 서서히 꺼진다
+    // 위험 방향: 켜져 있는 동안 바뀌면 짧은 쪽으로 돌아가고, 꺼져 있다가 새로 켜지면 그 방향에서 바로 켜진다
+    // (기본 방향에서 돌아 들어오면 배너와 다른 방향이 잠깐 보인다). 경고가 끝나면 그 자리에서 서서히 꺼진다.
     val bearing = alertDirection?.let(RoadMotion::bearingDeg)
-    var aim by remember { mutableFloatStateOf(90f) }
-    LaunchedEffect(bearing) { if (bearing != null) aim += RoadMotion.shortestDelta(aim, bearing) }
-    val angle by animateFloatAsState(aim, tween(RoadMotion.TURN_MS), label = "aim")
     val intensity by animateFloatAsState(if (alertDirection != null) 1f else 0f, tween(RoadMotion.FADE_MS), label = "alert")
+    val currentIntensity by rememberUpdatedState(intensity)
+    val aim = remember { Animatable(90f) }
+    LaunchedEffect(bearing) {
+        if (bearing == null) return@LaunchedEffect
+        val target = aim.value + RoadMotion.shortestDelta(aim.value, bearing)
+        if (currentIntensity < RoadMotion.SNAP_BELOW) aim.snapTo(target) else aim.animateTo(target, tween(RoadMotion.TURN_MS))
+    }
+    val angle = aim.value
     val nearMix by animateFloatAsState(if (alertDirection == Direction.NEAR) 1f else 0f, tween(RoadMotion.FADE_MS), label = "near")
 
     // 차선 점선 이동량(m): 실제 속도로 누적, 정차하면 멈춘다
@@ -116,6 +123,8 @@ internal object RoadMotion {
     const val CURVE_MS = 600
     const val TURN_MS = 450
     const val FADE_MS = 400
+    /** 위험 빛이 이보다 어두우면(꺼져 있음) 새 방향으로 돌지 않고 바로 옮긴다. */
+    const val SNAP_BELOW = 0.05f
 
     /** 바닥 치수(m). 차로 폭은 국내 고속도로 기준, 차는 아이오닉 5(전폭 1,890mm, 전장 4,635mm). */
     const val LANE_W = 3.5f
