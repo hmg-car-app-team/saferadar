@@ -61,8 +61,21 @@ class RoadMotionTest {
 
     @Test fun steeringCurveIsBounded() {
         assertEquals(0f, RoadMotion.curveFor(null))
-        assertEquals(1f, RoadMotion.curveFor(720f))
-        assertEquals(-1f, RoadMotion.curveFor(-720f))
+        assertEquals("최대치에서 멈춘다", 1f, kotlin.math.abs(RoadMotion.curveFor(720f)))
+    }
+
+    /** Pleos 조향각은 왼쪽이 +(에뮬레이터 확인). 왼쪽으로 돌리면 도로가 화면 왼쪽(x 음수)으로 휜다. */
+    @Test fun steeringLeftBendsRoadLeft() {
+        assertTrue("왼쪽(+90°)", RoadMotion.curveFor(90f) < 0f)
+        assertTrue("오른쪽(-90°)", RoadMotion.curveFor(-90f) > 0f)
+    }
+
+    /** 시스템 애니메이션 배율 0(접근성 "애니메이션 삭제" 포함)이면 정지 화면, 그 밖의 양수 배율은 평소대로. */
+    @Test fun systemAnimationOffMeansStillScene() {
+        assertTrue(RoadMotion.isStill(0f))
+        assertTrue("읽기 실패 등 잘못된 값도 움직이지 않는 쪽으로", RoadMotion.isStill(Float.NaN))
+        assertTrue(!RoadMotion.isStill(0.5f) && !RoadMotion.isStill(1f) && !RoadMotion.isStill(10f))
+        assertTrue("정지 동심원은 파장이 움직이는 범위 안", RoadMotion.STILL_RIPPLES.all { it in 0f..1f })
     }
 
     /** 뒤에서 본 차체가 바로 앞 바닥을 가리므로, 앞쪽 경고 보조 빛은 차 이미지 윗변 너머에 있어야 보인다. */

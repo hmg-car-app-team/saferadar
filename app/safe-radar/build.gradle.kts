@@ -24,6 +24,14 @@ logger.lifecycle("[server-url] safe-radar: source=$serverUrlSource")
 val releaseDefaultUrl = "http://127.0.0.1:8765"
 fun quoted(s: String) = "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
+// release 서명: app/.signing/signing.properties(커밋 금지, .gitignore)가 있으면 그 키로 서명한다.
+// 항목: storeFile(.signing/ 안의 파일 이름), storePassword, keyAlias, keyPassword. 없으면 서명되지 않은 release APK 가 나온다.
+val signingProps = Properties().apply {
+    rootProject.file(".signing/signing.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
+}
+val hasReleaseSigning = signingProps.getProperty("storeFile") != null
+logger.lifecycle("[signing] safe-radar release: " + (if (hasReleaseSigning) "app/.signing" else "unsigned"))
+
 android {
     namespace = "com.hmgcarapp.saferadar"
     compileSdk = 35
@@ -32,8 +40,17 @@ android {
         applicationId = "com.hmgcarapp.saferadar"
         minSdk = 28
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
+    }
+
+    signingConfigs {
+        if (hasReleaseSigning) create("release") {
+            storeFile = rootProject.file(".signing/" + signingProps.getProperty("storeFile"))
+            storePassword = signingProps.getProperty("storePassword")
+            keyAlias = signingProps.getProperty("keyAlias")
+            keyPassword = signingProps.getProperty("keyPassword")
+        }
     }
 
     buildTypes {
@@ -41,6 +58,7 @@ android {
             buildConfigField("String", "RADAR_SERVER_URL", quoted(configuredServerUrl.ifEmpty { "http://10.0.2.2:8765" }))
         }
         release {
+            if (hasReleaseSigning) signingConfig = signingConfigs.getByName("release")
             buildConfigField("String", "RADAR_SERVER_URL", quoted(if (configuredServerUrl.isEmpty()) releaseDefaultUrl else configuredServerUrl))
         }
     }

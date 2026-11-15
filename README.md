@@ -14,7 +14,7 @@
 - 위험 이벤트 5종 감지: 급감속 · 급가속 · 방향지시등 없는 차로변경 · 고속 지속 · 급격한 고속 진입
 - 주행 점수 리포트: 주차 시 오늘의 점수·감점 구간·개선 팁, 주간 추이, 배지. 기록은 최근 60회, 이 기기에만 저장
 - 근접 경고(옵트인, 기본 꺼짐): 같은 방향 약 200m 안의 위험 등급 차량을 음성과 배너로 안내
-- 주행 중에는 읽기 전용 한 화면: 하늘색 도로 위 내 차(아이오닉 5)와 내 차에서 퍼지는 감지 파장, 위험 차량이 있는 방향으로 빨간 빛이 번짐. 경고 문구는 반투명 유리 배너. 설정은 정차 중에만 변경
+- 주행 중에는 읽기 전용 한 화면: 하늘색 도로 위 내 차(아이오닉 5)와 내 차에서 퍼지는 감지 파장, 위험 차량이 있는 방향으로 빨간 빛이 번짐. 경고 문구는 반투명 유리 배너. 시스템 애니메이션을 끄면 정지 화면으로 표시. 설정은 정차 중에만 변경
 
 ## 실행 방법
 1. 에뮬레이터에 `apk/hmg-car-app-team_SafeRadar_release.apk` 를 설치해 실행합니다 (`adb install`).
@@ -25,7 +25,7 @@
 - 화면 2560x1440, 가로(Landscape)
 
 ## APK 위치
-`apk/hmg-car-app-team_SafeRadar_release.apk` (최소 SDK 28 / target 35)
+`apk/hmg-car-app-team_SafeRadar_release.apk` (버전 0.2.0, 최소 SDK 28 / target 35). Pleos Connect v2.1.0 에뮬레이터에 설치하고 주행 신호를 주입해 확인했습니다.
 
 ## 개인정보
 - 기기에 저장: 최근 60회 주행 기록(시각·점수·거리·시간·이벤트 횟수)만 앱 전용 저장소에 둡니다. 이동 경로·음성은 저장하지 않습니다. `설정 > 기록 > 저장된 주행 기록 모두 삭제`로 지웁니다.
@@ -47,5 +47,7 @@ cd app
 ./gradlew :safe-radar:assembleDebug :safe-radar:assembleRelease
 ./gradlew :core:test :safe-radar:testDebugUnitTest
 ```
+
+release 서명 키는 저장소에 없습니다. `app/.signing/signing.properties`(`storeFile`, `storePassword`, `keyAlias`, `keyPassword`)와 키 파일을 두면 그 키로 서명하고, 없으면 서명되지 않은 release APK 가 나옵니다(`.signing/` 은 .gitignore).
 
 서드파티 고지는 `app/NOTICE`, 폰트 라이선스는 `app/licenses/` 에 있습니다.

@@ -1,5 +1,9 @@
 package com.hmgcarapp.saferadar.ui
 
+import android.database.ContentObserver
+import android.os.Handler
+import android.os.Looper
+import android.provider.Settings
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.RepeatMode
@@ -7,12 +11,16 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -37,6 +45,7 @@ import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.imageResource
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -60,33 +69,44 @@ import kotlin.math.sin
  * 주변 차량은 서버가 Geohash7 셀(약 150m)과 8방향으로만 알려 주므로 다른 차의 모델이나 차로 위 위치는 그리지 않는다.
  * 위험 차량이 있는 방향으로 내 차에서 빨간 빛이 번지고, 각도·거리 모두 부드럽게 옅어진다([Direction.NEAR] 면 둘레 전체).
  * 색은 Pleos 토큰에서만 만든다(하늘색 = regulation_blue 와 흰색을 섞은 값).
+ *
+ * 시스템에서 애니메이션을 끄면(개발자 옵션 배율 0, 접근성 "애니메이션 삭제") 파장·맥동·점선 흐름·방향 회전을 모두 멈추고
+ * 같은 정보를 정지된 그림으로 보여 준다(파장은 고정된 동심원, 위험 빛은 최대 밝기로 바로 켜고 끈다).
  */
 @Composable
 fun RoadScene(speedKmh: Float?, steerDeg: Float?, alertDirection: Direction?, modifier: Modifier = Modifier) {
     val pal = rememberRoadPalette()
     val car = ImageBitmap.imageResource(R.drawable.ego_car)
-    val loop = rememberInfiniteTransition(label = "road")
-    val ripple by loop.animateFloat(0f, 1f, infiniteRepeatable(tween(RoadMotion.RIPPLE_MS, easing = LinearEasing)), label = "ripple")
-    val pulse by loop.animateFloat(0.72f, 1f, infiniteRepeatable(tween(RoadMotion.PULSE_MS), RepeatMode.Reverse), label = "pulse")
-    val curve by animateFloatAsState(RoadMotion.curveFor(steerDeg), tween(RoadMotion.CURVE_MS), label = "curve")
+    val still = rememberReduceMotion()
+    // 반복 애니메이션은 움직임이 허용될 때만 만든다(꺼져 있으면 프레임을 돌리지 않는다)
+    var ripple: State<Float>? = null
+    var pulse: State<Float>? = null
+    if (!still) {
+        val loop = rememberInfiniteTransition(label = "road")
+        ripple = loop.animateFloat(0f, 1f, infiniteRepeatable(tween(RoadMotion.RIPPLE_MS, easing = LinearEasing)), label = "ripple")
+        pulse = loop.animateFloat(0.72f, 1f, infiniteRepeatable(tween(RoadMotion.PULSE_MS), RepeatMode.Reverse), label = "pulse")
+    }
+    val curve by animateFloatAsState(RoadMotion.curveFor(steerDeg), if (still) snap() else tween(RoadMotion.CURVE_MS), label = "curve")
 
     // 위험 방향: 켜져 있는 동안 바뀌면 짧은 쪽으로 돌아가고, 꺼져 있다가 새로 켜지면 그 방향에서 바로 켜진다
     // (기본 방향에서 돌아 들어오면 배너와 다른 방향이 잠깐 보인다). 경고가 끝나면 그 자리에서 서서히 꺼진다.
     val bearing = alertDirection?.let(RoadMotion::bearingDeg)
-    val intensity by animateFloatAsState(if (alertDirection != null) 1f else 0f, tween(RoadMotion.FADE_MS), label = "alert")
+    val intensity by animateFloatAsState(if (alertDirection != null) 1f else 0f, if (still) snap() else tween(RoadMotion.FADE_MS), label = "alert")
     val currentIntensity by rememberUpdatedState(intensity)
+    val currentStill by rememberUpdatedState(still)
     val aim = remember { Animatable(90f) }
     LaunchedEffect(bearing) {
         if (bearing == null) return@LaunchedEffect
         val target = aim.value + RoadMotion.shortestDelta(aim.value, bearing)
-        if (currentIntensity < RoadMotion.SNAP_BELOW) aim.snapTo(target) else aim.animateTo(target, tween(RoadMotion.TURN_MS))
+        if (currentStill || currentIntensity < RoadMotion.SNAP_BELOW) aim.snapTo(target) else aim.animateTo(target, tween(RoadMotion.TURN_MS))
     }
-    val nearMix by animateFloatAsState(if (alertDirection == Direction.NEAR) 1f else 0f, tween(RoadMotion.FADE_MS), label = "near")
+    val nearMix by animateFloatAsState(if (alertDirection == Direction.NEAR) 1f else 0f, if (still) snap() else tween(RoadMotion.FADE_MS), label = "near")
 
-    // 차선 점선 이동량(m): 실제 속도로 누적, 정차하면 멈춘다
+    // 차선 점선 이동량(m): 실제 속도로 누적, 정차하거나 애니메이션이 꺼져 있으면 멈춘다
     val speed by rememberUpdatedState(speedKmh ?: 0f)
     var travelM by remember { mutableFloatStateOf(0f) }
-    LaunchedEffect(Unit) {
+    LaunchedEffect(still) {
+        if (still) return@LaunchedEffect
         var last = 0L
         while (true) {
             withFrameNanos { now ->
@@ -110,11 +130,12 @@ fun RoadScene(speedKmh: Float?, steerDeg: Float?, alertDirection: Direction?, mo
                 }) {
                     drawRoad(road, travelM)
                     drawGroundLight(pal)
-                    drawRipples(pal, ripple)
+                    drawRipples(pal, ripple?.value)
                     if (intensity > 0.01f) {
                         val angle = aim.value
-                        drawHazard(pal, angle, intensity * pulse, nearMix, cam.zNear)
-                        drawAheadGlow(pal, angle, intensity * pulse * (1f - nearMix))
+                        val glow = intensity * (pulse?.value ?: 1f)
+                        drawHazard(pal, angle, glow, nearMix, cam.zNear)
+                        drawAheadGlow(pal, angle, glow * (1f - nearMix))
                     }
                     drawCarShadow(pal)
                 }
@@ -122,6 +143,25 @@ fun RoadScene(speedKmh: Float?, steerDeg: Float?, alertDirection: Direction?, mo
             }
         },
     )
+}
+
+/**
+ * 시스템 애니메이션 배율(Settings.Global.ANIMATOR_DURATION_SCALE)이 0 이면 true. 접근성의 "애니메이션 삭제"도 이 값을 0 으로 만든다.
+ * 설정이 바뀌면 바로 따라간다.
+ */
+@Composable
+fun rememberReduceMotion(): Boolean {
+    val resolver = LocalContext.current.contentResolver
+    fun read() = RoadMotion.isStill(Settings.Global.getFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f))
+    var still by remember { mutableStateOf(read()) }
+    DisposableEffect(resolver) {
+        val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean) { still = read() }
+        }
+        resolver.registerContentObserver(Settings.Global.getUriFor(Settings.Global.ANIMATOR_DURATION_SCALE), false, observer)
+        onDispose { resolver.unregisterContentObserver(observer) }
+    }
+    return still
 }
 
 /** 순수 값: 바닥 치수, 방향 -> 바닥 각도, 위험 그라디언트 감쇠, 조향 -> 도로 휨. */
@@ -149,7 +189,10 @@ internal object RoadMotion {
     const val LINE_W_M = 0.09f
     /** 조향 최대일 때 휨 정도: x = k·z² (200m 앞에서 약 32m 옆). */
     const val CURVE_K = 0.0008f
-    /** 운전대를 이만큼 돌리면 도로가 최대로 휜다(VHAL 관례: 오른쪽이 +). */
+    /**
+     * 운전대를 이만큼 돌리면 도로가 최대로 휜다. Pleos Vehicle SDK 조향각은 왼쪽이 +다
+     * (Pleos Connect v2.1.0 에뮬레이터에서 +90° 를 넣으면 시스템 주행 화면의 도로가 왼쪽으로 휜다).
+     */
     const val STEER_FULL_DEG = 90f
 
     /** 위험 그라디언트: 중심 방향에서 이 각도만큼 벌어지면 0. */
@@ -177,7 +220,14 @@ internal object RoadMotion {
 
     val CAR_CENTER = Offset(0f, CAR_L / 2f)
 
-    fun curveFor(steerDeg: Float?): Float = ((steerDeg ?: 0f) / STEER_FULL_DEG).coerceIn(-1f, 1f)
+    /** 화면 도로 휨(-1 왼쪽 .. +1 오른쪽). 조향각은 왼쪽이 + 라 부호를 뒤집는다. */
+    fun curveFor(steerDeg: Float?): Float = (0f - (steerDeg ?: 0f) / STEER_FULL_DEG).coerceIn(-1f, 1f)
+
+    /** 애니메이션 배율이 0(또는 잘못된 값)이면 움직임 없이 그린다. */
+    fun isStill(animatorScale: Float): Boolean = !(animatorScale > 0f)
+
+    /** 애니메이션이 꺼져 있을 때 파장 대신 그리는 고정 동심원의 위치(0..1, 파장 진행도와 같은 축). */
+    val STILL_RIPPLES = floatArrayOf(0.12f, 0.45f, 0.78f)
 
     /** 바닥 각도(도): +x(오른쪽) 기준, +z(앞) 쪽으로 증가. [Direction.NEAR] 는 특정 방향이 없다. */
     fun bearingDeg(d: Direction): Float? = when (d) {
@@ -335,10 +385,11 @@ private fun DrawScope.drawGroundLight(p: RoadPalette) {
 }
 
 /** 내 차에서 바닥을 따라 퍼지는 하늘색 파장: 바닥 위 원이라 원근이 도로와 정확히 맞는다. */
-private fun DrawScope.drawRipples(p: RoadPalette, progress: Float) {
+/** [progress] 가 null 이면(애니메이션 꺼짐) 감지 범위를 고정 동심원으로 그린다. */
+private fun DrawScope.drawRipples(p: RoadPalette, progress: Float?) {
     val c = RoadMotion.CAR_CENTER
-    repeat(RoadMotion.RIPPLE_COUNT) { i ->
-        val t = (progress + i.toFloat() / RoadMotion.RIPPLE_COUNT) % 1f
+    val phases = if (progress == null) RoadMotion.STILL_RIPPLES else FloatArray(RoadMotion.RIPPLE_COUNT) { i -> (progress + i.toFloat() / RoadMotion.RIPPLE_COUNT) % 1f }
+    phases.forEach { t ->
         val fadeOut = (1f - t) * (1f - t)
         drawCircle(p.wave.copy(alpha = 0.60f * fadeOut), RoadMotion.RIPPLE_MIN_M + (RoadMotion.RIPPLE_MAX_M - RoadMotion.RIPPLE_MIN_M) * t, c, style = Stroke(0.08f + 0.22f * (1f - t)))
     }
