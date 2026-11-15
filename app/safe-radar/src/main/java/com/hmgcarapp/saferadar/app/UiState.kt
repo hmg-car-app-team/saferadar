@@ -13,6 +13,9 @@ data class TripReport(val summary: TripSummary, val demo: Boolean, val endWallMs
 /** 진행 중 주행의 미리보기. */
 data class LiveTrip(val active: Boolean = false, val score: Int? = null, val events: Int = 0, val minutes: Int = 0, val km: Double = 0.0)
 
+/** 주행 화면의 속도·제한속도·조향각. 최근 값이 없으면 null(화면에 지어내지 않는다). */
+data class DriveMotion(val speedKmh: Float? = null, val limitKmh: Int? = null, val steerDeg: Float? = null)
+
 /** 수신 중인 신호(없는 신호는 해당 이벤트를 판단하지 못한다: 화면에 정직하게 표시). */
 data class SignalAvail(val speed: Boolean = false, val brake: Boolean = false, val turn: Boolean = false, val steer: Boolean = false, val location: Boolean = false)
 
@@ -24,6 +27,7 @@ data class UiState(
     val page: Page = Page.TODAY,
     val warn: WarnState = WarnState(driving = true), // drive 초기값(DRIVING, fail-safe)과 일치
     val live: LiveTrip = LiveTrip(),
+    val motion: DriveMotion = DriveMotion(),
     val report: TripReport? = null,
     val share: ShareStatus = ShareStatus.NO_CONSENT,
     val serverConfigured: Boolean = false,

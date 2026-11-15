@@ -23,11 +23,19 @@ object Approach {
     }
 }
 
-data class Banner(val text: String, val untilMs: Long)
+/** [direction] 은 주행 화면의 감지 원호 중 어느 쪽을 켤지 정한다(없으면 원호를 켜지 않는다). */
+data class Banner(val text: String, val untilMs: Long, val direction: Direction? = null)
+
+/**
+ * 주행 화면 감지 원호에 켤 방향. 음성·배너의 반복 억제와 별개로, 가장 최근 응답에서 가장 가까운 위험 등급 차량의
+ * 방향을 [WarnFlow.RADAR_HOLD_MS] 동안 유지한다(차량이 범위 안에 머무는 동안 응답이 올 때마다 연장된다).
+ */
+data class RadarMark(val direction: Direction, val untilMs: Long)
 
 data class WarnState(
     val driving: Boolean = false,
     val banner: Banner? = null,
+    val radar: RadarMark? = null,
     val lastSpokeAt: Long? = null,
     /** "방향 묶음|유형" -> 마지막 경고 시각(같은 상황 반복 경고 방지; 묶음은 [Direction.group]) */
     val lastBySignature: Map<String, Long> = emptyMap(),
@@ -50,6 +58,8 @@ sealed interface WarnEffect {
  */
 object WarnFlow {
     const val BANNER_MS = 3_000L
+    /** 서버 응답 주기(3초)보다 길게 잡아 범위 안에 있는 동안 원호가 깜빡이지 않게 한다. */
+    const val RADAR_HOLD_MS = 5_000L
     const val SIGNATURE_COOLDOWN_MS = 30_000L
     const val MIN_GAP_MS = 8_000L
     const val MAX_SIGNATURES = 16
@@ -57,21 +67,27 @@ object WarnFlow {
     fun reduce(st: WarnState, e: WarnEvent): Pair<WarnState, List<WarnEffect>> = when (e) {
         is WarnEvent.DriveChanged ->
             if (e.driving) st.copy(driving = true) to emptyList()
-            else st.copy(driving = false, banner = null) to listOf(WarnEffect.CancelSpeech)
-        is WarnEvent.Tick ->
-            (if (st.banner != null && e.tMs >= st.banner.untilMs) st.copy(banner = null) else st) to emptyList()
+            else st.copy(driving = false, banner = null, radar = null) to listOf(WarnEffect.CancelSpeech)
+        is WarnEvent.Tick -> st.copy(
+            banner = st.banner?.takeIf { e.tMs < it.untilMs },
+            radar = st.radar?.takeIf { e.tMs < it.untilMs },
+        ).let { if (it == st) st else it } to emptyList()
         is WarnEvent.Nearby -> nearby(st, e)
     }
 
-    private fun nearby(st: WarnState, e: WarnEvent.Nearby): Pair<WarnState, List<WarnEffect>> {
-        if (!st.driving) return st to emptyList()
+    private val NEAREST = compareBy<Candidate> { it.distanceM }.thenBy { it.direction.ordinal }
+
+    private fun nearby(st0: WarnState, e: WarnEvent.Nearby): Pair<WarnState, List<WarnEffect>> {
+        if (!st0.driving) return st0 to emptyList()
+        val high = e.candidates.filter { it.grade == RiskGrade.HIGH }
+        // 원호는 쿨다운과 무관하게 지금 가장 가까운 위험 차량 방향을 보여 준다
+        val st = high.minWithOrNull(NEAREST)?.let { st0.copy(radar = RadarMark(it.direction, e.tMs + RADAR_HOLD_MS)) } ?: st0
         st.lastSpokeAt?.let { if (e.tMs - it < MIN_GAP_MS) return st to emptyList() }
-        val pick = e.candidates
-            .filter { it.grade == RiskGrade.HIGH }
+        val pick = high
             .filter { c -> st.lastBySignature[sig(c)]?.let { e.tMs - it >= SIGNATURE_COOLDOWN_MS } ?: true }
-            .minWithOrNull(compareBy<Candidate> { it.distanceM }.thenBy { it.direction.ordinal }) ?: return st to emptyList()
+            .minWithOrNull(NEAREST) ?: return st to emptyList()
         val sigs = (st.lastBySignature + (sig(pick) to e.tMs)).entries.sortedByDescending { it.value }.take(MAX_SIGNATURES).associate { it.key to it.value }
-        val next = st.copy(banner = Banner(WarnText.banner(pick), e.tMs + BANNER_MS), lastSpokeAt = e.tMs, lastBySignature = sigs)
+        val next = st.copy(banner = Banner(WarnText.banner(pick), e.tMs + BANNER_MS, pick.direction), lastSpokeAt = e.tMs, lastBySignature = sigs)
         return next to listOf(WarnEffect.Speak(WarnText.voice(pick)))
     }
 

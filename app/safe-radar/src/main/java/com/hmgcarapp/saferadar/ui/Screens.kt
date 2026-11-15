@@ -1,11 +1,20 @@
 package com.hmgcarapp.saferadar.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -17,7 +26,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import com.hmgcarapp.core.drive.DriveState
 import com.hmgcarapp.core.ui.rememberDriveSnapshot
@@ -32,6 +45,7 @@ import com.hmgcarapp.pleos.designsystem.component.PleosStatus
 import com.hmgcarapp.pleos.designsystem.component.PleosStatusBadge
 import com.hmgcarapp.pleos.designsystem.component.PleosSwitch
 import com.hmgcarapp.pleos.designsystem.component.rememberPleosToastState
+import com.hmgcarapp.pleos.designsystem.theme.PleosRadius
 import com.hmgcarapp.pleos.designsystem.theme.PleosSpacing
 import com.hmgcarapp.pleos.designsystem.theme.PleosTheme
 import com.hmgcarapp.pleos.designsystem.theme.PleosWindowMode
@@ -40,12 +54,14 @@ import com.hmgcarapp.saferadar.app.RadarController
 import com.hmgcarapp.saferadar.app.TripReport
 import com.hmgcarapp.saferadar.app.UiState
 import com.hmgcarapp.saferadar.domain.Badge
+import com.hmgcarapp.saferadar.domain.Banner
 import com.hmgcarapp.saferadar.domain.PrivacyText
 import com.hmgcarapp.saferadar.domain.ShareStatus
 import com.hmgcarapp.saferadar.domain.Trends
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.roundToInt
 
 @Composable
 private fun Txt(t: String, style: TextStyle = PleosTheme.typography.bodyMedium, secondary: Boolean = false, modifier: Modifier = Modifier) =
@@ -108,20 +124,63 @@ private fun ConsentPopup(c: RadarController, onDone: (() -> Unit)? = null, onAgr
 // ---------------- 주행 중: 읽기 전용 한 화면(조작 요소 없음) ----------------
 @Composable
 private fun DrivingView(s: UiState) {
-    Column(Modifier.fillMaxSize().testTag("driving_view"), verticalArrangement = Arrangement.spacedBy(PleosSpacing.m)) {
-        // 상단 배너(3초): 근접 경고. 디자인시스템에 배너 컴포넌트가 없어 PleosPanel 로 대체(docs/apps/safe-radar.md 기록)
-        s.warn.banner?.let { b ->
-            PleosPanel(Modifier.fillMaxWidth().testTag("warn_banner")) {
-                Txt(b.text, PleosTheme.typography.titleMedium, modifier = Modifier.testTag("banner_msg"))
+    val banner = s.warn.banner
+    val sceneDescription = banner?.text ?: "주변에 알릴 위험 차량이 없어요"
+    Box(Modifier.fillMaxSize().clip(RoundedCornerShape(PleosRadius.xl)).testTag("driving_view")) {
+        // 배경: 하늘색 그라디언트 위 원근 도로, 내 차, 8방향 감지 원호(위험 방향만 빨강), 내 차에서 퍼지는 파장
+        RoadScene(
+            speedKmh = s.motion.speedKmh, steerDeg = s.motion.steerDeg, alertDirection = s.warn.radar?.direction ?: banner?.direction,
+            modifier = Modifier.fillMaxSize().semantics { contentDescription = sceneDescription }.testTag("road_scene"),
+        )
+        Column(Modifier.align(Alignment.TopCenter).padding(top = PleosSpacing.xxl), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(PleosSpacing.xs)) {
+            Txt(s.motion.speedKmh?.roundToInt()?.toString() ?: "–", PleosTheme.typography.headlineLarge, modifier = Modifier.testTag("live_speed"))
+            Txt("km/h", PleosTheme.typography.bodyMedium, secondary = true)
+            // 근접 경고 3초 배너: 속도 바로 아래, 원호와 같은 빨강 배지로 방향을 함께 읽게 한다
+            banner?.let { AlertBanner(it) }
+        }
+        s.motion.limitKmh?.let { LimitSign(it, Modifier.align(Alignment.CenterStart).padding(start = PleosSpacing.xxxl)) }
+        Row(Modifier.align(Alignment.BottomStart).padding(PleosSpacing.xl), horizontalArrangement = Arrangement.spacedBy(PleosSpacing.m), verticalAlignment = Alignment.CenterVertically) {
+            HudChip {
+                Txt("이번 주행", PleosTheme.typography.labelMedium, secondary = true)
+                Txt(s.live.score?.let { "${it}점" } ?: "–", PleosTheme.typography.titleLarge, modifier = Modifier.testTag("live_score"))
+                if (s.live.active) Txt("위험 이벤트 ${s.live.events}회 · ${s.live.minutes}분 · ${String.format(Locale.KOREA, "%.1f", s.live.km)}km", PleosTheme.typography.labelMedium, secondary = true, modifier = Modifier.testTag("live_detail"))
             }
         }
-        PleosPanel(Modifier.fillMaxWidth()) {
-            Txt("이번 주행", PleosTheme.typography.bodyMedium, secondary = true)
-            Txt(s.live.score?.toString() ?: "–", PleosTheme.typography.headlineLarge, modifier = Modifier.testTag("live_score"))
-            if (s.live.active) Txt("위험 이벤트 ${s.live.events}회 · ${s.live.minutes}분 · ${String.format(Locale.KOREA, "%.1f", s.live.km)}km", PleosTheme.typography.bodyLarge, secondary = true, modifier = Modifier.testTag("live_detail"))
-            Txt(s.share.label, PleosTheme.typography.bodyMedium, secondary = true, modifier = Modifier.testTag("share_status"))
-        }
+        PleosStatusBadge(s.share.label, shareStatusKind(s.share), Modifier.align(Alignment.BottomEnd).padding(PleosSpacing.xl).testTag("share_status"))
     }
+}
+
+@Composable
+private fun AlertBanner(b: Banner) {
+    Row(
+        Modifier.widthIn(max = PleosTheme.dimensions.toastMaxWidth).clip(RoundedCornerShape(PleosRadius.l))
+            .background(PleosTheme.colors.surfaceBasic).border(PleosSpacing.xxs, PleosTheme.colors.regulationRed, RoundedCornerShape(PleosRadius.l))
+            .padding(horizontal = PleosSpacing.l, vertical = PleosSpacing.m).testTag("warn_banner"),
+        horizontalArrangement = Arrangement.spacedBy(PleosSpacing.m), verticalAlignment = Alignment.CenterVertically,
+    ) {
+        PleosStatusBadge("주의", PleosStatus.Negative)
+        Txt(b.text, PleosTheme.typography.titleMedium, modifier = Modifier.testTag("banner_msg"))
+    }
+}
+
+/** 국내 규제 표지 모양(흰 바탕 빨간 테두리 원). 제한속도를 모르면 그리지 않는다. */
+@Composable
+private fun LimitSign(limitKmh: Int, modifier: Modifier = Modifier) {
+    val c = PleosTheme.colors
+    Box(
+        modifier.size(PleosSpacing.xxxl * 2).clip(CircleShape).background(c.basicStaticLight100).border(PleosSpacing.xs, c.regulationRed, CircleShape)
+            .semantics { contentDescription = "제한속도 ${limitKmh}킬로미터" }.testTag("limit_sign"),
+        contentAlignment = Alignment.Center,
+    ) { Text("$limitKmh", style = PleosTheme.typography.titleLarge, color = c.basicStaticDark100) }
+}
+
+@Composable
+private fun HudChip(content: @Composable () -> Unit) {
+    Column(
+        Modifier.clip(RoundedCornerShape(PleosRadius.l)).background(PleosTheme.colors.surfaceBasic.copy(alpha = 0.86f))
+            .padding(horizontal = PleosSpacing.l, vertical = PleosSpacing.m),
+        verticalArrangement = Arrangement.spacedBy(PleosSpacing.xxs),
+    ) { content() }
 }
 
 // ---------------- 정차 ----------------

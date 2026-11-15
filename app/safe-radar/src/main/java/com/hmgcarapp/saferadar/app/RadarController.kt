@@ -177,7 +177,8 @@ class RadarController(
 
         val live = LiveTrip(tracker.isActive, tracker.liveScore(), tracker.liveCounts.sum(), tracker.liveMinutes, tracker.liveDistanceKm)
         val avail = SignalAvail(speedFresh, fresh(lastBrake, lastBrakeAt, now) != null, fresh(lastTurn, lastTurnAt, now) != null, fresh(lastSteer, lastSteerAt, now, STEER_FRESH_MS) != null, lastLoc != null && now - lastLocAt <= LOC_FRESH_MS)
-        _state.update { if (it.live == live && it.signals == avail) it else it.copy(live = live, signals = avail) }
+        val motion = DriveMotion(speed, fresh(lastLimit, lastLimitAt, now, LIMIT_FRESH_MS), fresh(lastSteer, lastSteerAt, now, STEER_FRESH_MS))
+        _state.update { if (it.live == live && it.signals == avail && it.motion == motion) it else it.copy(live = live, signals = avail, motion = motion) }
 
         shareTick(now, speed)
         if (now - lastPersistTick >= PERSIST_EVERY_MS) { lastPersistTick = now; if (SavePolicy.periodic(tracker.isActive, demoJob != null)) scheduleSave() }
