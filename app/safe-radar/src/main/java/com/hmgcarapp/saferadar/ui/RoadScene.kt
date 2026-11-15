@@ -191,12 +191,13 @@ internal object RoadMotion {
 
 /**
  * 바닥 평면 -> 화면 원근 투영(핀홀 카메라). 카메라는 내 차 뒤 [dc] m, 높이 [hc] m 에서 앞을 본다.
- * 화면 비율로 정한다: 지평선 30%, 뒤 범퍼 80%, 차 폭은 화면 폭의 17%(높이의 30% 이내).
+ * 화면 비율로 정한다: 지평선 30%, 뒤 범퍼 80%. 차 폭은 가로 창(2분할·전체)에서 폭의 20%(높이의 40% 이내),
+ * 세로 창(3분할 840dp)에서 폭의 30%.
  */
 internal class GroundCamera(w: Float, val h: Float) {
     val horizonY = h * 0.30f
     val groundY = h * 0.80f
-    val carPx = min(w * 0.20f, h * 0.40f)
+    val carPx = if (w < h) w * 0.30f else min(w * 0.20f, h * 0.40f)
     val dc = 12f
     val f = carPx / RoadMotion.CAR_W * dc
     val hc = (groundY - horizonY) * dc / f

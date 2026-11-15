@@ -67,10 +67,14 @@ class RoadMotionTest {
 
     /** 뒤에서 본 차체가 바로 앞 바닥을 가리므로, 앞쪽 경고 보조 빛은 차 이미지 윗변 너머에 있어야 보인다. */
     @Test fun frontHazardGlowReachesPastTheCarRoof() {
-        val cam = GroundCamera(2400f, 1000f)
-        val carTop = cam.y(RoadMotion.Z_CONTACT) - cam.carImageWidthPx() * EGO_IMAGE_ASPECT
-        val hiddenUntilZ = cam.zAt(carTop)
-        assertTrue("앞쪽 빛 중심(${RoadMotion.AHEAD_GLOW_Z}m)이 차에 가려지는 거리(${hiddenUntilZ}m) 너머여야 한다", RoadMotion.AHEAD_GLOW_Z > hiddenUntilZ)
+        // 전체·2분할(가로)과 3분할(세로 840dp) 창 모두
+        listOf(2400f to 1000f, 1700f to 1100f, 790f to 1050f).forEach { (w, h) ->
+            val cam = GroundCamera(w, h)
+            val carTop = cam.y(RoadMotion.Z_CONTACT) - cam.carImageWidthPx() * EGO_IMAGE_ASPECT
+            val hiddenUntilZ = cam.zAt(carTop)
+            assertTrue("${w}x${h}: 앞쪽 빛 중심(${RoadMotion.AHEAD_GLOW_Z}m)이 차에 가려지는 거리(${hiddenUntilZ}m) 너머여야 한다", RoadMotion.AHEAD_GLOW_Z > hiddenUntilZ)
+            assertTrue("${w}x${h}: 차 윗변이 속도 표시(위 25%)를 침범하지 않는다", carTop > h * 0.25f)
+        }
         assertEquals("정면이면 가장 밝다", 1f, RoadMotion.aheadWeight(90f), 1e-4f)
         assertEquals("옆 경고에는 앞쪽 빛이 없다", 0f, RoadMotion.aheadWeight(0f), 1e-4f)
         assertEquals("뒤 경고에는 앞쪽 빛이 없다", 0f, RoadMotion.aheadWeight(-90f), 1e-4f)

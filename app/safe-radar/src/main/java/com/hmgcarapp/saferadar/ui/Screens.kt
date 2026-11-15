@@ -28,6 +28,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -151,11 +155,32 @@ private fun DrivingView(s: UiState) {
 }
 
 @Composable
+/**
+ * 근접 경고 3초 배너: 반투명 유리(리퀴드 글래스) 상자. 바탕이 반쯤 비쳐 뒤의 도로 장면이 보이고,
+ * 윗면 광택과 빛을 받는 테두리(왼쪽 위 흰빛 -> 오른쪽 아래 붉은빛), 경고 배지 쪽의 옅은 붉은 기운으로 경고임을 알린다.
+ */
 private fun AlertBanner(b: Banner) {
+    val c = PleosTheme.colors
+    val shape = RoundedCornerShape(percent = 50)
+    val light = c.basicStaticLight100
+    val sheen = if (c.isDark) 0.14f else 0.50f
     Row(
-        Modifier.widthIn(max = PleosTheme.dimensions.toastMaxWidth).clip(RoundedCornerShape(PleosRadius.l))
-            .background(PleosTheme.colors.surfaceBasic).border(PleosSpacing.xxs, PleosTheme.colors.regulationRed, RoundedCornerShape(PleosRadius.l))
-            .padding(horizontal = PleosSpacing.l, vertical = PleosSpacing.m).testTag("warn_banner"),
+        Modifier.widthIn(max = PleosTheme.dimensions.toastMaxWidth)
+            .clip(shape)
+            .background(Brush.verticalGradient(
+                0f to c.surfaceBasic.copy(alpha = if (c.isDark) 0.58f else 0.66f),
+                1f to c.surfaceBasic.copy(alpha = if (c.isDark) 0.38f else 0.44f),
+            ))
+            .drawBehind {
+                drawRect(Brush.radialGradient(0f to c.regulationRed.copy(alpha = 0.22f), 1f to Color.Transparent, center = Offset(size.height * 0.9f, size.height / 2f), radius = size.height * 2.2f))
+                drawRect(Brush.verticalGradient(0f to light.copy(alpha = sheen), 0.5f to light.copy(alpha = 0f)))
+            }
+            .border(
+                PleosSpacing.xxs / 2,
+                Brush.linearGradient(0f to light.copy(alpha = if (c.isDark) 0.45f else 0.9f), 0.45f to light.copy(alpha = 0.06f), 1f to c.regulationRed.copy(alpha = 0.55f)),
+                shape,
+            )
+            .padding(horizontal = PleosSpacing.xl, vertical = PleosSpacing.m).testTag("warn_banner"),
         horizontalArrangement = Arrangement.spacedBy(PleosSpacing.m), verticalAlignment = Alignment.CenterVertically,
     ) {
         PleosStatusBadge("주의", PleosStatus.Negative)

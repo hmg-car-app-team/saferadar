@@ -41,7 +41,7 @@
 |---|---|
 | `ui/RoadScene.kt` | 하늘, 바닥 투영(`GroundCamera`), 도로·파장·위험 그라디언트, 차 이미지 배치. 순수 계산은 `RoadMotion` |
 | `res/drawable-nodpi/ego_car.png` | 아이오닉 5 렌더 |
-| `ui/Screens.kt` | `DrivingView` = 장면 + 속도/제한속도/경고 배너/주행 요약 칩/공유 상태 배지 |
+| `ui/Screens.kt` | `DrivingView` = 장면 + 속도/제한속도/경고 배너/주행 요약 칩/공유 상태 배지. 경고 배너는 반투명 유리(리퀴드 글래스) 알약 모양: 반쯤 비치는 바탕, 윗면 광택, 왼쪽 위 흰빛에서 오른쪽 아래 붉은빛으로 이어지는 테두리 |
 | `domain/WarnFlow.kt` | `Banner.direction`, `RadarMark`, `WarnState.radar` |
 | `app/UiState.kt`, `app/RadarController.kt` | 틱마다 `DriveMotion`(속도·제한속도·조향각, 최근 값만) 갱신 |
 
@@ -53,6 +53,17 @@
 | 다크 · 왼쪽 뒤 위험 | 다크 · 앞쪽 위험 | 라이트 · 왼쪽 뒤 위험 |
 |---|---|---|
 | ![](driving-road-view/dark-rear-left.png) | ![](driving-road-view/dark-front.png) | ![](driving-road-view/light-rear-left.png) |
+
+## 분할 화면
+
+Pleos Connect-S(2560×1440)에서 앱 창은 왼쪽 주행 화면(840) 옆에 붙는다. 3분할이면 세로 840×1184dp 창, 2분할이면 가로 1700×1184dp 창이다. 에뮬레이터 화면을 이 창 크기로 맞춰(3분할: 1050×1480px·200dpi, 2분할: 1551×1080px·146dpi) 시연 모드의 경고 순간을 캡처했다. 에뮬레이터 상태바·내비게이션 바는 잘라냈다.
+
+- 세로 창에서는 차 폭을 창 폭의 30%로 키운다(가로 창은 폭 20%·높이 40% 중 작은 값). 차 윗변이 속도 표시를 침범하지 않고 앞쪽 보조 빛이 차에 가려지지 않는지 세 창 크기 모두 테스트로 확인한다.
+- 경고 배너는 3분할 세로 창에서도 한 줄로 들어간다.
+
+| 3분할 · 라이트 (840×1184dp) | 2분할 · 라이트 (1700×1184dp) | 2분할 · 다크 |
+|---|---|---|
+| ![](driving-road-view/split3-light.jpg) | ![](driving-road-view/split2-light.jpg) | ![](driving-road-view/split2-dark.jpg) |
 
 ## 남은 일
 
