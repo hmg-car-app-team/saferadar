@@ -11,6 +11,13 @@
 | ![](docs/media/saferadar-in-car-rear-left.jpg) | ![](docs/media/saferadar-in-car-front.jpg) | ![](docs/media/saferadar-screen-2split.jpg) |
 
 ## 주요 기능
+
+| 주행 중 근접 경고 | 정차 후 주행 리포트 | 근접 경고 동의 |
+|---|---|---|
+| ![주행 중 왼쪽 뒤 위험 차량 경고 화면](docs/media/saferadar-pleos-warning.jpg) | ![정차 후 오늘의 안전점수 리포트 화면](docs/media/saferadar-pleos-report.jpg) | ![근접 경고 옵트인 동의 팝업](docs/media/saferadar-pleos-consent.jpg) |
+
+Pleos Connect v2.1.0 에뮬레이터에서 앱을 실행해 찍은 앱 창 화면입니다.
+
 - 위험 이벤트 5종 감지: 급감속 · 급가속 · 방향지시등 없는 차로변경 · 고속 지속 · 급격한 고속 진입
 - 주행 점수 리포트: 주차 시 오늘의 점수·감점 구간·개선 팁, 주간 추이, 배지. 기록은 최근 60회, 이 기기에만 저장
 - 근접 경고(옵트인, 기본 꺼짐): 같은 방향 약 200m 안의 위험 등급 차량을 음성과 배너로 안내
