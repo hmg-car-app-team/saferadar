@@ -18,99 +18,218 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Matrix
+import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.res.imageResource
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import com.hmgcarapp.pleos.designsystem.theme.PleosTheme
+import com.hmgcarapp.saferadar.R
 import com.hmgcarapp.saferadar.domain.Direction
+import kotlin.math.PI
+import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.min
+import kotlin.math.roundToInt
 import kotlin.math.sin
 
 /**
- * 주행 화면 배경(읽기 전용). 하늘색 그라디언트 위에 원근 도로, 뒤에서 본 내 차, 내 차 둘레 8방향 감지 원호,
- * 내 차에서 퍼지는 하늘색 파장을 그린다.
+ * 주행 화면 배경(읽기 전용). 하늘색 그라디언트 하늘 아래, 바닥 평면 위에 도로·파장·위험 방향 그라디언트를 그리고
+ * 그 위에 내 차(아이오닉 5 렌더 이미지, res/drawable-nodpi/ego_car.png)를 올린다.
  *
- * 주변 차량은 서버가 Geohash7 셀(약 150m)과 8방향으로만 알려 주므로 차로 위 위치나 다른 차 모델은 그리지 않는다.
- * 위험 차량이 있는 방향은 해당 원호만 빨갛게 맥동한다([Direction.NEAR] 이면 원호 전체).
+ * 바닥 위 요소는 모두 미터 단위 바닥 좌표(x = 오른쪽, z = 앞)에서 그린 뒤 원근 행렬 하나([GroundCamera.matrix])로
+ * 화면에 투영한다. 그래서 차선·파장·위험 그라디언트가 같은 소실점, 같은 각도로 맞물린다.
+ *
+ * 주변 차량은 서버가 Geohash7 셀(약 150m)과 8방향으로만 알려 주므로 다른 차의 모델이나 차로 위 위치는 그리지 않는다.
+ * 위험 차량이 있는 방향으로 내 차에서 빨간 빛이 번지고, 각도·거리 모두 부드럽게 옅어진다([Direction.NEAR] 면 둘레 전체).
  * 색은 Pleos 토큰에서만 만든다(하늘색 = regulation_blue 와 흰색을 섞은 값).
  */
 @Composable
 fun RoadScene(speedKmh: Float?, steerDeg: Float?, alertDirection: Direction?, modifier: Modifier = Modifier) {
     val pal = rememberRoadPalette()
+    val car = ImageBitmap.imageResource(R.drawable.ego_car)
     val loop = rememberInfiniteTransition(label = "road")
     val ripple by loop.animateFloat(0f, 1f, infiniteRepeatable(tween(RoadMotion.RIPPLE_MS, easing = LinearEasing)), label = "ripple")
-    val pulse by loop.animateFloat(0.55f, 1f, infiniteRepeatable(tween(RoadMotion.PULSE_MS), RepeatMode.Reverse), label = "pulse")
+    val pulse by loop.animateFloat(0.72f, 1f, infiniteRepeatable(tween(RoadMotion.PULSE_MS), RepeatMode.Reverse), label = "pulse")
     val curve by animateFloatAsState(RoadMotion.curveFor(steerDeg), tween(RoadMotion.CURVE_MS), label = "curve")
+
+    // 위험 방향: 바뀌면 짧은 쪽으로 돌아가고, 경고가 끝나면 그 자리에서 서서히 꺼진다
+    val bearing = alertDirection?.let(RoadMotion::bearingDeg)
+    var aim by remember { mutableFloatStateOf(90f) }
+    LaunchedEffect(bearing) { if (bearing != null) aim += RoadMotion.shortestDelta(aim, bearing) }
+    val angle by animateFloatAsState(aim, tween(RoadMotion.TURN_MS), label = "aim")
+    val intensity by animateFloatAsState(if (alertDirection != null) 1f else 0f, tween(RoadMotion.FADE_MS), label = "alert")
+    val nearMix by animateFloatAsState(if (alertDirection == Direction.NEAR) 1f else 0f, tween(RoadMotion.FADE_MS), label = "near")
+
+    // 차선 점선 이동량(m): 실제 속도로 누적, 정차하면 멈춘다
     val speed by rememberUpdatedState(speedKmh ?: 0f)
-    // 차선 점선의 이동량(주기 단위 0..1): 실제 속도에 비례해 누적한다. 정차하면 멈춘다.
-    var travel by remember { mutableFloatStateOf(0f) }
+    var travelM by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(Unit) {
         var last = 0L
         while (true) {
             withFrameNanos { now ->
-                if (last != 0L) travel = (travel + speed / 3.6f * ((now - last) / 1_000_000_000f) / RoadMotion.DASH_CYCLE_M) % 1f
+                if (last != 0L) travelM = (travelM + speed / 3.6f * ((now - last) / 1_000_000_000f)) % RoadMotion.DASH_CYCLE_M
                 last = now
             }
         }
     }
+
     Canvas(modifier) {
-        val g = RoadGeometry(size.width, size.height, curve)
+        val cam = GroundCamera(size.width, size.height)
         drawSky(pal)
-        drawRoad(g, pal, travel)
-        drawHalo(g, pal)
-        drawRipples(g, pal, ripple)
-        drawSensorArcs(g, pal, alertDirection, pulse, front = true)
-        drawEgoCar(g, pal)
-        drawSensorArcs(g, pal, alertDirection, pulse, front = false)
+        withTransform({
+            transform(cam.matrix())
+            clipRect(-RoadMotion.CLIP_HALF_W, cam.zNear, RoadMotion.CLIP_HALF_W, RoadMotion.Z_FAR)
+        }) {
+            drawRoad(cam, pal, curve * RoadMotion.CURVE_K, travelM)
+            drawGroundLight(pal)
+            drawRipples(pal, ripple)
+            if (intensity > 0.01f) {
+                drawHazard(pal, angle, intensity * pulse, nearMix, cam.zNear)
+                drawAheadGlow(pal, angle, intensity * pulse * (1f - nearMix))
+            }
+            drawCarShadow(pal)
+        }
+        drawEgoCar(cam, car)
     }
 }
 
-/** 순수 값: 방향 -> 원호 각도, 조향각 -> 도로 휨. */
+/** 순수 값: 바닥 치수, 방향 -> 바닥 각도, 위험 그라디언트 감쇠, 조향 -> 도로 휨. */
 internal object RoadMotion {
-    const val RIPPLE_MS = 2_600
-    const val PULSE_MS = 650
+    const val RIPPLE_MS = 3_000
+    const val PULSE_MS = 900
     const val CURVE_MS = 600
-    /** 점선 한 주기(칠한 선 + 빈칸)를 실제 도로 9m 로 본다. */
-    const val DASH_CYCLE_M = 9f
+    const val TURN_MS = 450
+    const val FADE_MS = 400
+
+    /** 바닥 치수(m). 차로 폭은 국내 고속도로 기준, 차는 아이오닉 5(전폭 1,890mm, 전장 4,635mm). */
+    const val LANE_W = 3.5f
+    const val CAR_W = 1.89f
+    const val CAR_L = 4.64f
+    /** 차 이미지의 바퀴 접지선 위치(뒤 범퍼에서 앞으로, m). */
+    const val Z_CONTACT = 0.6f
+    const val Z_FAR = 220f
+    const val CLIP_HALF_W = 80f
+    const val DASH_M = 6f
+    const val GAP_M = 9f
+    const val DASH_CYCLE_M = DASH_M + GAP_M
+    /** 조향 최대일 때 휨 정도: x = k·z² (200m 앞에서 약 32m 옆). */
+    const val CURVE_K = 0.0008f
     /** 운전대를 이만큼 돌리면 도로가 최대로 휜다(VHAL 관례: 오른쪽이 +). */
     const val STEER_FULL_DEG = 90f
-    const val SWEEP_DEG = 36f
-    const val RIPPLE_COUNT = 3
 
-    val SECTORS = listOf(Direction.FRONT, Direction.FRONT_RIGHT, Direction.RIGHT, Direction.REAR_RIGHT, Direction.REAR, Direction.REAR_LEFT, Direction.LEFT, Direction.FRONT_LEFT)
+    /** 위험 그라디언트: 중심 방향에서 이 각도만큼 벌어지면 0. */
+    const val HAZARD_SPREAD_DEG = 70f
+    const val HAZARD_RADIUS_M = 11f
+    /** 거리 마스크: 반경의 이 비율에서 가장 밝고, [HAZARD_HALF_AT] 에서 절반, 끝에서 0. */
+    const val HAZARD_PEAK_AT = 0.3f
+    const val HAZARD_HALF_AT = 0.62f
+
+    /**
+     * 앞쪽 경고 보조 빛. 차 바로 앞 바닥은 뒤에서 본 차체에 가려지므로, 앞쪽 계열 경고는 차 지붕 너머 [AHEAD_GLOW_Z] m 에
+     * 앞뒤로 긴 빛을 하나 더 둔다(옆으로는 [AHEAD_GLOW_SHIFT_X] m 까지만 비켜 화면을 가로지르지 않는다).
+     */
+    const val AHEAD_GLOW_Z = 40f
+    const val AHEAD_GLOW_R = 7f
+    const val AHEAD_GLOW_STRETCH = 3f
+    const val AHEAD_GLOW_SHIFT_X = 6f
+    /** 바로 근처일 때 둘레 전체 밝기. */
+    const val NEAR_LEVEL = 0.75f
+    const val SWEEP_STEPS = 72
+    const val RIPPLE_COUNT = 3
+    const val RIPPLE_MIN_M = 2.8f
+    /** 파장의 가장 큰 반경(m). 원 전체를 그리므로 뒤쪽 끝이 카메라 앞에 있어야 한다(테스트로 고정). */
+    const val RIPPLE_MAX_M = 12f
+
+    val CAR_CENTER = Offset(0f, CAR_L / 2f)
 
     fun curveFor(steerDeg: Float?): Float = ((steerDeg ?: 0f) / STEER_FULL_DEG).coerceIn(-1f, 1f)
 
-    /** Compose 원호 각도(0 = 화면 오른쪽, 시계 방향). 진행 방향(앞)이 화면 위다. [Direction.NEAR] 는 특정 원호가 없다. */
-    fun angleOf(d: Direction): Float? = when (d) {
-        Direction.FRONT -> -90f
-        Direction.FRONT_RIGHT -> -45f
+    /** 바닥 각도(도): +x(오른쪽) 기준, +z(앞) 쪽으로 증가. [Direction.NEAR] 는 특정 방향이 없다. */
+    fun bearingDeg(d: Direction): Float? = when (d) {
+        Direction.FRONT -> 90f
+        Direction.FRONT_RIGHT -> 45f
         Direction.RIGHT -> 0f
-        Direction.REAR_RIGHT -> 45f
-        Direction.REAR -> 90f
-        Direction.REAR_LEFT -> 135f
+        Direction.REAR_RIGHT -> -45f
+        Direction.REAR -> -90f
+        Direction.REAR_LEFT -> -135f
         Direction.LEFT -> 180f
-        Direction.FRONT_LEFT -> -135f
+        Direction.FRONT_LEFT -> 135f
         Direction.NEAR -> null
     }
 
-    /** 차 뒤에 가려지는 쪽(앞·옆)은 차보다 먼저 그리고, 뒤쪽 원호는 차 위에 그린다. */
-    fun isBehindCar(angleDeg: Float): Boolean = sin(Math.toRadians(angleDeg.toDouble())) <= 0.01
+    /** from 에서 to 로 가는 가장 짧은 회전(도, -180..180). */
+    fun shortestDelta(from: Float, to: Float): Float = (((to - from) % 360f + 540f) % 360f) - 180f
+
+    /** 앞쪽 보조 빛 세기(0..1)와 옆 위치(m): 정면 1, 왼쪽·오른쪽 앞 0.7, 옆·뒤 0. */
+    fun aheadWeight(angleDeg: Float): Float = sin(Math.toRadians(angleDeg.toDouble())).toFloat().coerceAtLeast(0f)
+    fun aheadShiftX(angleDeg: Float): Float = AHEAD_GLOW_SHIFT_X * cos(Math.toRadians(angleDeg.toDouble())).toFloat()
+
+    /** 위험 중심 방향과 [deltaDeg] 만큼 떨어진 곳의 밝기(1..0). 끝에서 기울기가 0 이라 경계선이 생기지 않는다. */
+    fun hazardFalloff(deltaDeg: Float): Float {
+        val t = abs(deltaDeg) / HAZARD_SPREAD_DEG
+        if (t >= 1f) return 0f
+        val c = cos(t * PI / 2).toFloat()
+        return c * c
+    }
+}
+
+/**
+ * 바닥 평면 -> 화면 원근 투영(핀홀 카메라). 카메라는 내 차 뒤 [dc] m, 높이 [hc] m 에서 앞을 본다.
+ * 화면 비율로 정한다: 지평선 30%, 뒤 범퍼 80%, 차 폭은 화면 폭의 17%(높이의 30% 이내).
+ */
+internal class GroundCamera(w: Float, val h: Float) {
+    val horizonY = h * 0.30f
+    val groundY = h * 0.80f
+    val carPx = min(w * 0.20f, h * 0.40f)
+    val dc = 12f
+    val f = carPx / RoadMotion.CAR_W * dc
+    val hc = (groundY - horizonY) * dc / f
+    val cx = w / 2f
+    /** 화면 맨 아래보다 조금 더 가까운 바닥(z). */
+    val zNear = f * hc / (h - horizonY) - dc - 0.5f
+
+    fun x(gx: Float, gz: Float): Float = cx + f * gx / (gz + dc)
+    fun y(gz: Float): Float = horizonY + f * hc / (gz + dc)
+    /** 화면 y 에 보이는 바닥 거리(z). [y] 의 역함수. */
+    fun zAt(screenY: Float): Float = f * hc / (screenY - horizonY) - dc
+    /** 내 차 이미지의 화면 폭(뒤 범퍼 부근 기준). */
+    fun carImageWidthPx(): Float = f * RoadMotion.CAR_W / (0.3f + dc)
+
+    /** (x, z) -> 화면. u = cx + f·x/(z+dc), v = horizonY + f·hc/(z+dc) 를 3x3 원근 행렬로 쓴 것. */
+    fun matrix(): Matrix = Matrix().apply {
+        values[Matrix.ScaleX] = f
+        values[Matrix.SkewX] = cx
+        values[Matrix.TranslateX] = cx * dc
+        values[Matrix.SkewY] = 0f
+        values[Matrix.ScaleY] = horizonY
+        values[Matrix.TranslateY] = horizonY * dc + f * hc
+        values[Matrix.Perspective0] = 0f
+        values[Matrix.Perspective1] = 1f
+        values[Matrix.Perspective2] = dc
+    }
 }
 
 @Immutable
 private data class RoadPalette(
     val skyTop: Color, val skyMid: Color, val skyBottom: Color,
     val content: Color, val wave: Color, val danger: Color,
-    val carBody: Color, val carLight: Color, val glass: Color,
+    val carBody: Color, val carLight: Color,
 )
 
 @Composable
@@ -127,150 +246,133 @@ private fun rememberRoadPalette(): RoadPalette {
             danger = c.regulationRed,
             carBody = c.basicStaticDark100,
             carLight = c.basicStaticLight100,
-            glass = lerp(c.basicStaticDark100, c.regulationBlue, 0.28f),
         )
-    }
-}
-
-/** 장면 배치. 모두 캔버스 크기에 비례하므로 폼팩터(Connect-S/L/W)마다 같은 구도가 된다. */
-private class RoadGeometry(val w: Float, val h: Float, curve: Float) {
-    /** 위쪽 속도 표시와 겹치지 않게 지평선을 화면 30% 높이에 둔다. */
-    val horizonY = h * 0.30f
-    val carW = minOf(w * 0.15f, h * 0.26f)
-    val carH = carW * 0.82f
-    val cx = w / 2f
-    val groundY = h * 0.84f
-    private val laneHalf = carW * 0.95f
-    val vanishX = cx + curve * w * 0.20f
-    val sensorCenter = Offset(cx, groundY - carH * 0.40f)
-    val rippleCenter = Offset(cx, groundY - carH * 0.12f)
-
-    private fun halfAt(y: Float, lanes: Float) = laneHalf * lanes * (y - horizonY) / (groundY - horizonY)
-    private fun bottom(lanes: Float) = Offset(cx + halfAt(h, lanes), h)
-    private fun control(lanes: Float): Offset {
-        val my = (horizonY + h) / 2f
-        return Offset(cx + halfAt(my, lanes) + (vanishX - cx) * 0.15f, my)
-    }
-
-    /** 차선 하나: 화면 아래에서 소실점까지. [lanes] 는 내 차로 반폭의 배수(±1 = 내 차로 경계, ±3 = 도로 가장자리). */
-    fun line(lanes: Float): Path = Path().apply {
-        val b = bottom(lanes); val c = control(lanes)
-        moveTo(b.x, b.y); quadraticBezierTo(c.x, c.y, vanishX, horizonY)
-    }
-
-    /** 두 차선 사이 면. */
-    fun band(left: Float, right: Float): Path = Path().apply {
-        val bl = bottom(left); val cl = control(left); val br = bottom(right); val cr = control(right)
-        moveTo(bl.x, bl.y); quadraticBezierTo(cl.x, cl.y, vanishX, horizonY)
-        quadraticBezierTo(cr.x, cr.y, br.x, br.y); close()
     }
 }
 
 private fun DrawScope.drawSky(p: RoadPalette) =
     drawRect(Brush.verticalGradient(0f to p.skyTop, 0.45f to p.skyMid, 1f to p.skyBottom))
 
-private fun DrawScope.drawRoad(g: RoadGeometry, p: RoadPalette, travel: Float) {
-    fun fade(color: Color, alpha: Float) = Brush.verticalGradient(0f to color.copy(alpha = 0f), 1f to color.copy(alpha = alpha), startY = g.horizonY, endY = g.h)
-    drawPath(g.band(-3f, 3f), fade(p.content, 0.10f))
-    // 내 차로: 하늘색 주행 카펫
-    drawPath(g.band(-1f, 1f), Brush.verticalGradient(0f to p.wave.copy(alpha = 0f), 0.7f to p.wave.copy(alpha = 0.16f), 1f to p.wave.copy(alpha = 0.30f), startY = g.horizonY, endY = g.h))
-    val width = g.carW * 0.022f
-    for (edge in floatArrayOf(-3f, 3f)) drawPath(g.line(edge), fade(p.content, 0.40f), style = Stroke(width, cap = StrokeCap.Round))
-    // 내 차로 경계는 점선: 속도에 맞춰 화면 아래로 흐른다
-    val dash = g.carH * 0.42f; val gap = g.carH * 0.58f
-    val effect = PathEffect.dashPathEffect(floatArrayOf(dash, gap), travel * (dash + gap))
-    for (lane in floatArrayOf(-1f, 1f)) drawPath(g.line(lane), fade(p.content, 0.65f), style = Stroke(width, pathEffect = effect))
+// ---------- 아래 draw 함수들은 바닥 좌표(m)에서 그린다(drawEgoCar 제외) ----------
+
+/** 멀어질수록 옅어지는 붓(z 기준). */
+private fun fade(color: Color, alpha: Float, zNear: Float) = Brush.verticalGradient(
+    0f to color.copy(alpha = alpha), 0.12f to color.copy(alpha = alpha * 0.8f), 0.45f to color.copy(alpha = alpha * 0.25f), 1f to color.copy(alpha = 0f),
+    startY = zNear, endY = RoadMotion.Z_FAR,
+)
+
+/** x = x0 + k·z² 포물선을 2차 베지어 하나로 정확히 그린다(두 끝 접선의 교점이 제어점). */
+private fun Path.parabola(x0: Float, k: Float, z0: Float, z1: Float, move: Boolean) {
+    if (move) moveTo(x0 + k * z0 * z0, z0) else lineTo(x0 + k * z0 * z0, z0)
+    quadraticBezierTo(x0 + k * z0 * z1, (z0 + z1) / 2f, x0 + k * z1 * z1, z1)
 }
 
-/** 첨부 레퍼런스처럼 차 너머가 밝게 번지는 빛. */
-private fun DrawScope.drawHalo(g: RoadGeometry, p: RoadPalette) {
-    val c = Offset(g.cx, g.groundY - g.carH * 0.85f)
-    val r = g.carW * 1.3f
-    scale(1.8f, 0.55f, pivot = c) {
-        drawCircle(Brush.radialGradient(0f to p.carLight.copy(alpha = 0.40f), 0.55f to p.wave.copy(alpha = 0.16f), 1f to Color.Transparent, center = c, radius = r), r, c)
+private fun lane(x0: Float, k: Float, z0: Float): Path = Path().apply { parabola(x0, k, z0, RoadMotion.Z_FAR, move = true) }
+
+private fun band(xl: Float, xr: Float, k: Float, z0: Float): Path = Path().apply {
+    parabola(xl, k, z0, RoadMotion.Z_FAR, move = true)
+    parabola(xr, k, RoadMotion.Z_FAR, z0, move = false)
+    close()
+}
+
+private fun DrawScope.drawRoad(cam: GroundCamera, p: RoadPalette, k: Float, travelM: Float) {
+    val z0 = cam.zNear
+    val edge = RoadMotion.LANE_W * 1.5f
+    drawPath(band(-edge - 0.6f, edge + 0.6f, k, z0), fade(p.content, 0.10f, z0))
+    // 내 차로: 하늘색 주행 카펫
+    drawPath(
+        band(-RoadMotion.LANE_W / 2, RoadMotion.LANE_W / 2, k, z0),
+        Brush.verticalGradient(
+            0f to p.wave.copy(alpha = 0.34f), 0.08f to p.wave.copy(alpha = 0.22f), 0.3f to p.wave.copy(alpha = 0.06f), 1f to p.wave.copy(alpha = 0f),
+            startY = z0, endY = RoadMotion.Z_FAR,
+        ),
+    )
+    val width = 0.09f
+    for (x in floatArrayOf(-edge, edge)) drawPath(lane(x, k, z0), fade(p.content, 0.45f, z0), style = Stroke(width))
+    val dashes = PathEffect.dashPathEffect(floatArrayOf(RoadMotion.DASH_M, RoadMotion.GAP_M), travelM)
+    for (x in floatArrayOf(-RoadMotion.LANE_W / 2, RoadMotion.LANE_W / 2)) drawPath(lane(x, k, z0), fade(p.content, 0.70f, z0), style = Stroke(width, pathEffect = dashes))
+}
+
+/** 차 앞쪽으로 번지는 빛(레퍼런스의 흰 광륜), 차 밑 하늘색 바닥광, 후미등이 도로에 비치는 붉은 반사. */
+private fun DrawScope.drawGroundLight(p: RoadPalette) {
+    val ahead = Offset(0f, 11f)
+    drawCircle(Brush.radialGradient(0f to p.carLight.copy(alpha = 0.32f), 0.5f to p.wave.copy(alpha = 0.12f), 1f to Color.Transparent, center = ahead, radius = 11f), 11f, ahead)
+    val c = RoadMotion.CAR_CENTER
+    drawCircle(Brush.radialGradient(0f to p.wave.copy(alpha = 0.42f), 1f to Color.Transparent, center = c, radius = 4.6f), 4.6f, c)
+    val tail = Offset(0f, -0.9f)
+    scale(1.35f, 1f, pivot = tail) {
+        drawCircle(Brush.radialGradient(0f to p.danger.copy(alpha = 0.30f), 1f to Color.Transparent, center = tail, radius = 1.8f), 1.8f, tail)
     }
 }
 
-/** 내 차에서 바닥을 따라 퍼지는 하늘색 파장(감지 범위가 살아 있음을 보여 준다). */
-private fun DrawScope.drawRipples(g: RoadGeometry, p: RoadPalette, progress: Float) {
-    val c = g.rippleCenter
+/** 내 차에서 바닥을 따라 퍼지는 하늘색 파장: 바닥 위 원이라 원근이 도로와 정확히 맞는다. */
+private fun DrawScope.drawRipples(p: RoadPalette, progress: Float) {
+    val c = RoadMotion.CAR_CENTER
     repeat(RoadMotion.RIPPLE_COUNT) { i ->
         val t = (progress + i.toFloat() / RoadMotion.RIPPLE_COUNT) % 1f
-        val rx = g.carW * (0.8f + 2.9f * t)
-        val ry = rx * 0.34f
         val fadeOut = (1f - t) * (1f - t)
-        drawOval(p.wave.copy(alpha = 0.60f * fadeOut), Offset(c.x - rx, c.y - ry), Size(rx * 2, ry * 2), style = Stroke(g.carW * (0.03f * (1f - t) + 0.008f)))
+        drawCircle(p.wave.copy(alpha = 0.60f * fadeOut), RoadMotion.RIPPLE_MIN_M + (RoadMotion.RIPPLE_MAX_M - RoadMotion.RIPPLE_MIN_M) * t, c, style = Stroke(0.08f + 0.22f * (1f - t)))
     }
 }
 
-private fun DrawScope.drawSensorArcs(g: RoadGeometry, p: RoadPalette, alert: Direction?, pulse: Float, front: Boolean) {
-    val c = g.sensorCenter
-    val rx = g.carW * 1.15f
-    val ry = rx * 0.62f
-    val band = g.carW * 0.13f
-    RoadMotion.SECTORS.forEach { d ->
-        val angle = RoadMotion.angleOf(d) ?: return@forEach
-        if (RoadMotion.isBehindCar(angle) != front) return@forEach
-        val start = angle - RoadMotion.SWEEP_DEG / 2
-        if (alert == d || alert == Direction.NEAR) {
-            arc(c, rx, ry, start, p.danger.copy(alpha = 0.18f * pulse), band * 2.6f)
-            arc(c, rx * 1.36f, ry * 1.36f, start, p.danger.copy(alpha = 0.45f * pulse), band * 0.6f)
-            arc(c, rx, ry, start, p.danger.copy(alpha = pulse), band * 1.25f)
-        } else {
-            arc(c, rx, ry, start, p.wave.copy(alpha = 0.30f), band)
-        }
+/**
+ * 위험 방향 그라디언트. 각도 방향은 부채꼴 그라디언트(중심 방향 1 -> 양옆 0), 거리 방향은 원형 마스크(차 바로 둘레가
+ * 가장 밝고 반경 끝에서 0)로 곱해, 내 차에서 위험 쪽으로 빛이 번지는 모양이 된다.
+ * 앞쪽 반경은 카메라 뒤까지 닿을 만큼 크므로, 원 대신 보이는 바닥([zNear] 앞쪽)으로 자른 사각형에 칠한다.
+ */
+private fun DrawScope.drawHazard(p: RoadPalette, angleDeg: Float, strength: Float, nearMix: Float, zNear: Float) {
+    val c = RoadMotion.CAR_CENTER
+    val r = RoadMotion.HAZARD_RADIUS_M
+    val steps = RoadMotion.SWEEP_STEPS
+    val stops = Array(steps + 1) { i ->
+        val a = i * 360f / steps
+        val directional = RoadMotion.hazardFalloff(RoadMotion.shortestDelta(angleDeg, a))
+        val alpha = (directional + (RoadMotion.NEAR_LEVEL - directional) * nearMix) * strength
+        (i.toFloat() / steps) to p.danger.copy(alpha = alpha.coerceIn(0f, 1f))
+    }
+    val area = Rect(c.x - r, maxOf(c.y - r, zNear), c.x + r, c.y + r)
+    drawIntoCanvas { it.saveLayer(area, Paint()) }
+    drawRect(Brush.sweepGradient(*stops, center = c), area.topLeft, area.size)
+    drawRect(
+        Brush.radialGradient(
+            0f to p.danger.copy(alpha = 0f), RoadMotion.HAZARD_PEAK_AT * 0.66f to p.danger.copy(alpha = 0f), RoadMotion.HAZARD_PEAK_AT to p.danger,
+            RoadMotion.HAZARD_HALF_AT to p.danger.copy(alpha = 0.5f), 1f to p.danger.copy(alpha = 0f),
+            center = c, radius = r,
+        ),
+        area.topLeft, area.size, blendMode = BlendMode.DstIn,
+    )
+    drawIntoCanvas { it.restore() }
+}
+
+/** 앞쪽 경고 보조 빛: 차 지붕 너머 바닥에 앞뒤로 긴 빨간 빛. */
+private fun DrawScope.drawAheadGlow(p: RoadPalette, angleDeg: Float, strength: Float) {
+    val w = RoadMotion.aheadWeight(angleDeg) * strength
+    if (w < 0.01f) return
+    val c = Offset(RoadMotion.aheadShiftX(angleDeg), RoadMotion.AHEAD_GLOW_Z)
+    val r = RoadMotion.AHEAD_GLOW_R
+    scale(1f, RoadMotion.AHEAD_GLOW_STRETCH, pivot = c) {
+        drawCircle(Brush.radialGradient(0f to p.danger.copy(alpha = 0.85f * w), 0.45f to p.danger.copy(alpha = 0.40f * w), 1f to Color.Transparent, center = c, radius = r), r, c)
     }
 }
 
-private fun DrawScope.arc(c: Offset, rx: Float, ry: Float, start: Float, color: Color, width: Float) =
-    drawArc(color, start, RoadMotion.SWEEP_DEG, false, Offset(c.x - rx, c.y - ry), Size(rx * 2, ry * 2), style = Stroke(width, cap = StrokeCap.Butt))
-
-/** 뒤에서 본 내 차(3/4 높이). 차체는 정적 다크 토큰, 윤곽은 하늘색 림 라이트. */
-private fun DrawScope.drawEgoCar(g: RoadGeometry, p: RoadPalette) {
-    val cx = g.cx; val gy = g.groundY; val w = g.carW; val h = g.carH; val top = gy - h
-    val shadowC = Offset(cx, gy)
-    scale(1f, 0.28f, pivot = shadowC) {
-        drawCircle(Brush.radialGradient(0f to p.carBody.copy(alpha = 0.55f), 1f to Color.Transparent, center = shadowC, radius = w * 0.78f), w * 0.78f, shadowC)
+/** 차 밑 접지 그림자(차 길이 방향으로 긴 타원). */
+private fun DrawScope.drawCarShadow(p: RoadPalette) {
+    val c = RoadMotion.CAR_CENTER
+    scale(0.55f, 1f, pivot = c) {
+        drawCircle(Brush.radialGradient(0f to p.carBody.copy(alpha = 0.60f), 0.7f to p.carBody.copy(alpha = 0.25f), 1f to Color.Transparent, center = c, radius = 3.1f), 3.1f, c)
     }
-    // 바퀴·사이드미러
-    drawRoundRect(p.carBody, Offset(cx - w * 0.49f, gy - h * 0.22f), Size(w * 0.17f, h * 0.24f), CornerRadius(w * 0.03f))
-    drawRoundRect(p.carBody, Offset(cx + w * 0.32f, gy - h * 0.22f), Size(w * 0.17f, h * 0.24f), CornerRadius(w * 0.03f))
-    for (side in floatArrayOf(-1f, 1f)) drawOval(p.carBody, Offset(cx + side * w * 0.56f - w * 0.06f, gy - h * 0.70f), Size(w * 0.12f, h * 0.08f))
+}
 
-    val body = Path().apply {
-        moveTo(cx - w * 0.50f, gy - h * 0.14f)
-        lineTo(cx - w * 0.53f, gy - h * 0.50f)
-        quadraticBezierTo(cx - w * 0.53f, gy - h * 0.62f, cx - w * 0.41f, gy - h * 0.66f)
-        lineTo(cx - w * 0.32f, top + h * 0.07f)
-        quadraticBezierTo(cx, top - h * 0.03f, cx + w * 0.32f, top + h * 0.07f)
-        lineTo(cx + w * 0.41f, gy - h * 0.66f)
-        quadraticBezierTo(cx + w * 0.53f, gy - h * 0.62f, cx + w * 0.53f, gy - h * 0.50f)
-        lineTo(cx + w * 0.50f, gy - h * 0.14f)
-        quadraticBezierTo(cx, gy - h * 0.06f, cx - w * 0.50f, gy - h * 0.14f)
-        close()
-    }
-    drawPath(body, Brush.verticalGradient(0f to lerp(p.carBody, p.carLight, 0.22f), 0.55f to p.carBody, 1f to p.carBody, startY = top, endY = gy))
-    drawPath(body, p.wave.copy(alpha = 0.55f), style = Stroke(w * 0.012f))
-
-    val glass = Path().apply {
-        moveTo(cx - w * 0.28f, top + h * 0.11f)
-        quadraticBezierTo(cx, top + h * 0.03f, cx + w * 0.28f, top + h * 0.11f)
-        lineTo(cx + w * 0.37f, gy - h * 0.64f)
-        quadraticBezierTo(cx, gy - h * 0.60f, cx - w * 0.37f, gy - h * 0.64f)
-        close()
-    }
-    drawPath(glass, Brush.verticalGradient(0f to p.glass, 1f to lerp(p.glass, p.wave, 0.35f), startY = top, endY = gy - h * 0.62f))
-    drawLine(p.carLight.copy(alpha = 0.18f), Offset(cx - w * 0.18f, top + h * 0.12f), Offset(cx - w * 0.26f, gy - h * 0.64f), w * 0.03f)
-    drawLine(p.carLight.copy(alpha = 0.16f), Offset(cx - w * 0.44f, gy - h * 0.52f), Offset(cx + w * 0.44f, gy - h * 0.52f), w * 0.008f)
-
-    // 후미등: 번짐 + 본체 + 밝은 심
-    for (left in booleanArrayOf(true, false)) {
-        val tl = Offset(if (left) cx - w * 0.48f else cx + w * 0.20f, gy - h * 0.47f)
-        val sz = Size(w * 0.28f, h * 0.07f)
-        drawRoundRect(p.danger.copy(alpha = 0.25f), tl - Offset(w * 0.03f, h * 0.04f), Size(sz.width + w * 0.06f, sz.height + h * 0.08f), CornerRadius(h * 0.06f))
-        drawRoundRect(p.danger, tl, sz, CornerRadius(h * 0.035f))
-        drawRoundRect(lerp(p.danger, p.carLight, 0.55f), tl + Offset(w * 0.02f, sz.height * 0.30f), Size(sz.width - w * 0.04f, sz.height * 0.30f), CornerRadius(h * 0.02f))
-    }
-    drawRoundRect(lerp(p.carBody, p.carLight, 0.06f), Offset(cx - w * 0.45f, gy - h * 0.30f), Size(w * 0.90f, h * 0.12f), CornerRadius(h * 0.05f))
-    drawRoundRect(p.carLight.copy(alpha = 0.14f), Offset(cx - w * 0.12f, gy - h * 0.40f), Size(w * 0.24f, h * 0.08f), CornerRadius(h * 0.015f))
+/** 내 차 렌더 이미지: 같은 카메라로 계산한 폭·접지선에 맞춰 화면 좌표에 놓는다. */
+private fun DrawScope.drawEgoCar(cam: GroundCamera, img: ImageBitmap) {
+    val wPx = cam.carImageWidthPx()
+    val hPx = wPx * img.height / img.width
+    val bottom = cam.y(RoadMotion.Z_CONTACT)
+    drawImage(
+        img,
+        srcOffset = IntOffset.Zero, srcSize = IntSize(img.width, img.height),
+        dstOffset = IntOffset((cam.cx - wPx / 2f).roundToInt(), (bottom - hPx).roundToInt()),
+        dstSize = IntSize(wPx.roundToInt(), hPx.roundToInt()),
+        filterQuality = FilterQuality.High,
+    )
 }
