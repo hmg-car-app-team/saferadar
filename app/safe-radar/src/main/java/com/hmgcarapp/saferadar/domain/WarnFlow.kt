@@ -23,11 +23,11 @@ object Approach {
     }
 }
 
-/** [direction] 은 주행 화면의 감지 원호 중 어느 쪽을 켤지 정한다(없으면 원호를 켜지 않는다). */
+/** [direction] 은 주행 화면에서 위험 빛을 어느 방향으로 번지게 할지 정한다(없으면 켜지 않는다). */
 data class Banner(val text: String, val untilMs: Long, val direction: Direction? = null)
 
 /**
- * 주행 화면 감지 원호에 켤 방향. 음성·배너의 반복 억제와 별개로, 가장 최근 응답에서 가장 가까운 위험 등급 차량의
+ * 주행 화면 위험 빛의 방향. 음성·배너의 반복 억제와 별개로, 가장 최근 응답에서 가장 가까운 위험 등급 차량의
  * 방향을 [WarnFlow.RADAR_HOLD_MS] 동안 유지한다(차량이 범위 안에 머무는 동안 응답이 올 때마다 연장된다).
  */
 data class RadarMark(val direction: Direction, val untilMs: Long)
@@ -58,7 +58,7 @@ sealed interface WarnEffect {
  */
 object WarnFlow {
     const val BANNER_MS = 3_000L
-    /** 서버 응답 주기(3초)보다 길게 잡아 범위 안에 있는 동안 원호가 깜빡이지 않게 한다. */
+    /** 서버 응답 주기(3초)보다 길게 잡아 범위 안에 있는 동안 위험 빛이 깜빡이지 않게 한다. */
     const val RADAR_HOLD_MS = 5_000L
     const val SIGNATURE_COOLDOWN_MS = 30_000L
     const val MIN_GAP_MS = 8_000L
@@ -80,7 +80,7 @@ object WarnFlow {
     private fun nearby(st0: WarnState, e: WarnEvent.Nearby): Pair<WarnState, List<WarnEffect>> {
         if (!st0.driving) return st0 to emptyList()
         val high = e.candidates.filter { it.grade == RiskGrade.HIGH }
-        // 원호는 쿨다운과 무관하게 지금 가장 가까운 위험 차량 방향을 보여 준다
+        // 위험 빛은 쿨다운과 무관하게 지금 가장 가까운 위험 차량 방향을 보여 준다
         val st = high.minWithOrNull(NEAREST)?.let { st0.copy(radar = RadarMark(it.direction, e.tMs + RADAR_HOLD_MS)) } ?: st0
         st.lastSpokeAt?.let { if (e.tMs - it < MIN_GAP_MS) return st to emptyList() }
         val pick = high

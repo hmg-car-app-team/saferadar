@@ -8,7 +8,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
@@ -19,6 +19,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.BlendMode
@@ -80,7 +81,6 @@ fun RoadScene(speedKmh: Float?, steerDeg: Float?, alertDirection: Direction?, mo
         val target = aim.value + RoadMotion.shortestDelta(aim.value, bearing)
         if (currentIntensity < RoadMotion.SNAP_BELOW) aim.snapTo(target) else aim.animateTo(target, tween(RoadMotion.TURN_MS))
     }
-    val angle = aim.value
     val nearMix by animateFloatAsState(if (alertDirection == Direction.NEAR) 1f else 0f, tween(RoadMotion.FADE_MS), label = "near")
 
     // 차선 점선 이동량(m): 실제 속도로 누적, 정차하면 멈춘다
@@ -96,24 +96,32 @@ fun RoadScene(speedKmh: Float?, steerDeg: Float?, alertDirection: Direction?, mo
         }
     }
 
-    Canvas(modifier) {
-        val cam = GroundCamera(size.width, size.height)
-        drawSky(pal)
-        withTransform({
-            transform(cam.matrix())
-            clipRect(-RoadMotion.CLIP_HALF_W, cam.zNear, RoadMotion.CLIP_HALF_W, RoadMotion.Z_FAR)
-        }) {
-            drawRoad(cam, pal, curve * RoadMotion.CURVE_K, travelM)
-            drawGroundLight(pal)
-            drawRipples(pal, ripple)
-            if (intensity > 0.01f) {
-                drawHazard(pal, angle, intensity * pulse, nearMix, cam.zNear)
-                drawAheadGlow(pal, angle, intensity * pulse * (1f - nearMix))
+    // 도로 경로·붓은 창 크기나 조향(curve)이 바뀔 때만 다시 만든다. 움직이는 값(파장·점선·위험 빛)은 그리기 단계에서만 읽는다.
+    Spacer(
+        modifier.drawWithCache {
+            val cam = GroundCamera(size.width, size.height)
+            val matrix = cam.matrix()
+            val road = RoadLayer(cam.zNear, curve * RoadMotion.CURVE_K, pal)
+            onDrawBehind {
+                drawSky(pal)
+                withTransform({
+                    transform(matrix)
+                    clipRect(-RoadMotion.CLIP_HALF_W, cam.zNear, RoadMotion.CLIP_HALF_W, RoadMotion.Z_FAR)
+                }) {
+                    drawRoad(road, travelM)
+                    drawGroundLight(pal)
+                    drawRipples(pal, ripple)
+                    if (intensity > 0.01f) {
+                        val angle = aim.value
+                        drawHazard(pal, angle, intensity * pulse, nearMix, cam.zNear)
+                        drawAheadGlow(pal, angle, intensity * pulse * (1f - nearMix))
+                    }
+                    drawCarShadow(pal)
+                }
+                drawEgoCar(cam, car)
             }
-            drawCarShadow(pal)
-        }
-        drawEgoCar(cam, car)
-    }
+        },
+    )
 }
 
 /** 순수 값: 바닥 치수, 방향 -> 바닥 각도, 위험 그라디언트 감쇠, 조향 -> 도로 휨. */
@@ -137,6 +145,8 @@ internal object RoadMotion {
     const val DASH_M = 6f
     const val GAP_M = 9f
     const val DASH_CYCLE_M = DASH_M + GAP_M
+    /** 차선 굵기(m). */
+    const val LINE_W_M = 0.09f
     /** 조향 최대일 때 휨 정도: x = k·z² (200m 앞에서 약 32m 옆). */
     const val CURVE_K = 0.0008f
     /** 운전대를 이만큼 돌리면 도로가 최대로 휜다(VHAL 관례: 오른쪽이 +). */
@@ -285,22 +295,31 @@ private fun band(xl: Float, xr: Float, k: Float, z0: Float): Path = Path().apply
     close()
 }
 
-private fun DrawScope.drawRoad(cam: GroundCamera, p: RoadPalette, k: Float, travelM: Float) {
-    val z0 = cam.zNear
-    val edge = RoadMotion.LANE_W * 1.5f
-    drawPath(band(-edge - 0.6f, edge + 0.6f, k, z0), fade(p.content, 0.10f, z0))
-    // 내 차로: 하늘색 주행 카펫
-    drawPath(
-        band(-RoadMotion.LANE_W / 2, RoadMotion.LANE_W / 2, k, z0),
-        Brush.verticalGradient(
-            0f to p.wave.copy(alpha = 0.34f), 0.08f to p.wave.copy(alpha = 0.22f), 0.3f to p.wave.copy(alpha = 0.06f), 1f to p.wave.copy(alpha = 0f),
-            startY = z0, endY = RoadMotion.Z_FAR,
-        ),
+/** 3차로 도로의 경로와 붓(바닥 좌표). 창 크기·조향이 바뀔 때만 만든다. */
+private class RoadLayer(z0: Float, k: Float, p: RoadPalette) {
+    private val edge = RoadMotion.LANE_W * 1.5f
+    private val half = RoadMotion.LANE_W / 2
+    val surface = band(-edge - 0.6f, edge + 0.6f, k, z0)
+    val surfaceBrush = fade(p.content, 0.10f, z0)
+    /** 내 차로: 하늘색 주행 카펫 */
+    val carpet = band(-half, half, k, z0)
+    val carpetBrush = Brush.verticalGradient(
+        0f to p.wave.copy(alpha = 0.34f), 0.08f to p.wave.copy(alpha = 0.22f), 0.3f to p.wave.copy(alpha = 0.06f), 1f to p.wave.copy(alpha = 0f),
+        startY = z0, endY = RoadMotion.Z_FAR,
     )
-    val width = 0.09f
-    for (x in floatArrayOf(-edge, edge)) drawPath(lane(x, k, z0), fade(p.content, 0.45f, z0), style = Stroke(width))
+    val edges = listOf(lane(-edge, k, z0), lane(edge, k, z0))
+    val edgeBrush = fade(p.content, 0.45f, z0)
+    val centers = listOf(lane(-half, k, z0), lane(half, k, z0))
+    val centerBrush = fade(p.content, 0.70f, z0)
+}
+
+private fun DrawScope.drawRoad(r: RoadLayer, travelM: Float) {
+    drawPath(r.surface, r.surfaceBrush)
+    drawPath(r.carpet, r.carpetBrush)
+    r.edges.forEach { drawPath(it, r.edgeBrush, style = Stroke(RoadMotion.LINE_W_M)) }
+    // 내 차로 경계 점선: 실제 속도로 흐른다
     val dashes = PathEffect.dashPathEffect(floatArrayOf(RoadMotion.DASH_M, RoadMotion.GAP_M), travelM)
-    for (x in floatArrayOf(-RoadMotion.LANE_W / 2, RoadMotion.LANE_W / 2)) drawPath(lane(x, k, z0), fade(p.content, 0.70f, z0), style = Stroke(width, pathEffect = dashes))
+    r.centers.forEach { drawPath(it, r.centerBrush, style = Stroke(RoadMotion.LINE_W_M, pathEffect = dashes)) }
 }
 
 /** 차 앞쪽으로 번지는 빛(레퍼런스의 흰 광륜), 차 밑 하늘색 바닥광, 후미등이 도로에 비치는 붉은 반사. */

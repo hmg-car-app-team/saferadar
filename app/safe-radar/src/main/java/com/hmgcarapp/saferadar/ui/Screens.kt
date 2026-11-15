@@ -131,7 +131,7 @@ private fun DrivingView(s: UiState) {
     val banner = s.warn.banner
     val sceneDescription = banner?.text ?: "주변에 알릴 위험 차량이 없어요"
     Box(Modifier.fillMaxSize().clip(RoundedCornerShape(PleosRadius.xl)).testTag("driving_view")) {
-        // 배경: 하늘색 그라디언트 위 원근 도로, 내 차, 8방향 감지 원호(위험 방향만 빨강), 내 차에서 퍼지는 파장
+        // 배경: 하늘색 그라디언트 위 원근 도로, 내 차(아이오닉 5), 내 차에서 퍼지는 파장, 위험 방향으로 번지는 빨간 빛
         RoadScene(
             speedKmh = s.motion.speedKmh, steerDeg = s.motion.steerDeg, alertDirection = s.warn.radar?.direction ?: banner?.direction,
             modifier = Modifier.fillMaxSize().semantics { contentDescription = sceneDescription }.testTag("road_scene"),
@@ -139,14 +139,16 @@ private fun DrivingView(s: UiState) {
         Column(Modifier.align(Alignment.TopCenter).padding(top = PleosSpacing.xxl), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(PleosSpacing.xs)) {
             Txt(s.motion.speedKmh?.roundToInt()?.toString() ?: "–", PleosTheme.typography.headlineLarge, modifier = Modifier.testTag("live_speed"))
             Txt("km/h", PleosTheme.typography.bodyMedium, secondary = true)
-            // 근접 경고 3초 배너: 속도 바로 아래, 원호와 같은 빨강 배지로 방향을 함께 읽게 한다
+            // 근접 경고 3초 배너: 속도 바로 아래, 위험 빛과 같은 빨강 배지로 방향을 함께 읽게 한다
             banner?.let { AlertBanner(it) }
         }
         s.motion.limitKmh?.let { LimitSign(it, Modifier.align(Alignment.CenterStart).padding(start = PleosSpacing.xxxl)) }
         Row(Modifier.align(Alignment.BottomStart).padding(PleosSpacing.xl), horizontalArrangement = Arrangement.spacedBy(PleosSpacing.m), verticalAlignment = Alignment.CenterVertically) {
             HudChip {
                 Txt("이번 주행", PleosTheme.typography.labelMedium, secondary = true)
-                Txt(s.live.score?.let { "${it}점" } ?: "–", PleosTheme.typography.titleLarge, modifier = Modifier.testTag("live_score"))
+                // 점수는 2분·0.5km 를 넘겨야 나온다. 그 전에는 빈 기호 대신 집계 중임을 알린다.
+                s.live.score?.let { Txt("${it}점", PleosTheme.typography.titleLarge, modifier = Modifier.testTag("live_score")) }
+                    ?: Txt(if (s.live.active) "집계 중" else "–", PleosTheme.typography.titleMedium, secondary = true, modifier = Modifier.testTag("live_score"))
                 if (s.live.active) Txt("위험 이벤트 ${s.live.events}회 · ${s.live.minutes}분 · ${String.format(Locale.KOREA, "%.1f", s.live.km)}km", PleosTheme.typography.labelMedium, secondary = true, modifier = Modifier.testTag("live_detail"))
             }
         }
@@ -154,11 +156,11 @@ private fun DrivingView(s: UiState) {
     }
 }
 
-@Composable
 /**
  * 근접 경고 3초 배너: 반투명 유리(리퀴드 글래스) 상자. 바탕이 반쯤 비쳐 뒤의 도로 장면이 보이고,
  * 윗면 광택과 빛을 받는 테두리(왼쪽 위 흰빛 -> 오른쪽 아래 붉은빛), 경고 배지 쪽의 옅은 붉은 기운으로 경고임을 알린다.
  */
+@Composable
 private fun AlertBanner(b: Banner) {
     val c = PleosTheme.colors
     val shape = RoundedCornerShape(percent = 50)

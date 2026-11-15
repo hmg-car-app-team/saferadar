@@ -89,5 +89,10 @@ class RoadMotionTest {
         assertTrue("원근 투영은 카메라 뒤(w<=0)를 그릴 수 없다", farthestBehind + cam.dc > 0.5f)
     }
 
-    private companion object { const val EGO_IMAGE_ASPECT = 618f / 720f } // res/drawable-nodpi/ego_car.png
+    private companion object {
+        /** 차 이미지(PNG IHDR 의 폭·높이)에서 직접 읽는다: 이미지를 바꾸면 검사도 따라간다. */
+        val EGO_IMAGE_ASPECT: Float = java.io.DataInputStream(java.io.File("src/main/res/drawable-nodpi/ego_car.png").inputStream()).use { s ->
+            s.skipBytes(16); val w = s.readInt(); val h = s.readInt(); h.toFloat() / w
+        }
+    }
 }
