@@ -19,7 +19,7 @@ import org.junit.Test
 import java.io.File
 
 @OptIn(ExperimentalCoroutinesApi::class)
-class ReviewFix3Test {
+class ConsentRevocationPersistTest {
     private class Api : ShareApi {
         val leaves = mutableListOf<String>(); var throwOnReport = false; var onReport: (() -> Unit)? = null
         override suspend fun report(r: Report): List<NearbyVehicle> { onReport?.invoke(); if (throwOnReport) throw java.io.IOException("x"); return emptyList() }

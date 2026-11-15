@@ -36,8 +36,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/** 리뷰 1라운드 수정 항목별 테스트. */
-class ReviewFix1Test {
+/** 공유 펌프 유령 억제, 개인정보 문구, 주행 점수·차선 판정 경계 테스트. */
+class SharePumpGhostAndPrivacyTest {
     private var now = 0L
     private fun pump() = SharePump(object : ShareApi {
         override suspend fun report(r: Report) = emptyList<NearbyVehicle>()

@@ -25,9 +25,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/** 리뷰 2라운드 수정 항목별 테스트. */
+/** 공유 철회 시 전송 생략과 leave 보장 테스트. */
 @OptIn(ExperimentalCoroutinesApi::class)
-class ReviewFix2Test {
+class ShareRevocationTest {
     private class Api : ShareApi {
         val reports = mutableListOf<Report>(); val leaves = mutableListOf<String>()
         var onReport: (() -> Unit)? = null; var leaveDelayMs = 0L
